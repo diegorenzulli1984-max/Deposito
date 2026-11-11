@@ -1,1 +1,1 @@
-reportlab supabase pandas openpyxl
+supabase-py reportlab pandas openpyxl
