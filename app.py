@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from fpdf import FPDF
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 from supabase import create_client, Client
 import io
 
@@ -35,22 +36,28 @@ menu = ["📊 Panel de Informes", "🚚 Emitir Remito de Entrega", "➕ Alta/Mod
 eleccion = st.sidebar.radio("Navegación", menu)
 
 def generar_pdf_remito(cliente, serie, cantidad, obs, articulo_nombre):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.set_text_color(30, 58, 138)
-    pdf.cell(0, 10, "REMITO DE ENTREGA OFICIAL", ln=True, align="C")
-    pdf.ln(10)
-    pdf.set_font("Helvetica", "", 12)
-    pdf.cell(0, 10, f"Cliente / Receptor de la entrega: {cliente}", ln=True)
-    pdf.cell(0, 10, f"Articulo Despachado: {articulo_nombre}", ln=True)
-    pdf.cell(0, 10, f"Numero de Serie: {serie}", ln=True)
-    pdf.cell(0, 10, f"Cantidad: {cantidad} unidades", ln=True)
-    pdf.cell(0, 10, f"Observaciones: {obs}", ln=True)
-    pdf.ln(20)
-    pdf.line(10, pdf.get_y(), 80, pdf.get_y())
-    pdf.cell(0, 10, "Firma del Receptor", ln=True)
-    return pdf.output(dest='S').encode('latin-1')
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    p.setFont("Helvetica-Bold", 18)
+    p.setFillColorRGB(0.12, 0.23, 0.54)
+    p.drawCentredString(300, 750, "REMITO DE ENTREGA OFICIAL")
+    
+    p.setFont("Helvetica", 12)
+    p.setFillColorRGB(0, 0, 0)
+    p.drawString(50, 700, f"Cliente / Receptor de la entrega: {cliente}")
+    p.drawString(50, 670, f"Articulo Despachado: {articulo_nombre}")
+    p.drawString(50, 640, f"Numero de Serie: {serie}")
+    p.drawString(50, 610, f"Cantidad: {cantidad} unidades")
+    p.drawString(50, 580, f"Observaciones: {obs}")
+    
+    p.setLineWidth(1)
+    p.line(50, 480, 250, 480)
+    p.drawString(50, 460, "Firma del Receptor")
+    
+    p.showPage()
+    p.save()
+    buffer.seek(0)
+    return buffer.getvalue()
 
 estados_permitidos = ["Nuevo", "Usado", "Baja", "Reciclaje"]
 
@@ -149,7 +156,7 @@ elif eleccion == "🚚 Emitir Remito de Entrega":
         else:
             res_item = supabase.table("inventario_deposito").select("*").eq("numero_serie", codigo_scan).execute()
             if res_item.data:
-                item = res_item.data[0]
+                item = res_item.data[0] if isinstance(res_item.data, list) else res_item.data
                 stock_actual = int(item["cantidad"])
                 articulo_nombre = item["articulo"]
                 
@@ -157,7 +164,6 @@ elif eleccion == "🚚 Emitir Remito de Entrega":
                     nueva_cantidad = stock_actual - cantidad_entrega
                     supabase.table("inventario_deposito").update({"cantidad": nueva_cantidad}).eq("numero_serie", codigo_scan).execute()
                     
-                    # 💡 AQUÍ SE QUEDA GUARDADO EL PDF FUERA DEL FORMULARIO PARA QUE NO DE ERROR
                     st.session_state["pdf_listo"] = generar_pdf_remito(cliente, codigo_scan, cantidad_entrega, observaciones, articulo_nombre)
                     st.session_state["cliente_remito"] = cliente
                     st.success(f"¡Sincronizado! Stock descontado en la nube. Quedan {nueva_cantidad} unidades de {articulo_nombre}.")
@@ -166,7 +172,6 @@ elif eleccion == "🚚 Emitir Remito de Entrega":
             else:
                 st.error("El Número de Serie escaneado no existe en la base de datos de internet.")
 
-    # El botón de descarga ahora se renderiza de forma totalmente segura por fuera de la estructura del formulario
     if "pdf_listo" in st.session_state:
         st.write("---")
         st.download_button(
@@ -206,3 +211,5 @@ elif eleccion == "➕ Alta/Modificación de Artículos":
         cod = st.text_input("Número de Serie:")
         nom = st.text_input("Nombre del Artículo:")
         cat = st.text_input("Categoría:")
+        est = st.selectbox("Estado en Depósito:", estados_permitidos)
+
