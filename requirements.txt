@@ -1,1 +1,2 @@
-streamlit pandas fpdf2 openpyxl 
+streamlit pandas openpyxl fpdf2 supabase
+
