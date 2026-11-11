@@ -1,1 +1,1 @@
-streamlit pandas openpyxl reportlab supabase
+reportlab supabase pandas openpyxl
