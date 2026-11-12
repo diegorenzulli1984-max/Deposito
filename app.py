@@ -6,10 +6,8 @@ from supabase import create_client, Client
 import io
 from datetime import datetime
 
-# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Control de Stock y Depósito", page_icon="📦", layout="wide")
 
-# --- CONEXIÓN A SUPABASE ---
 @st.cache_resource
 def iniciar_conexion():
     url = st.secrets["SUPABASE_URL"]
@@ -18,7 +16,6 @@ def iniciar_conexion():
 
 supabase: Client = iniciar_conexion()
 
-# --- LISTAS MAESTRAS ---
 ESTADOS_PERMITIDOS = ["Nuevo", "Usado", "A revisar", "Baja", "Reciclaje"]
 MODULOS_PERMITIDOS = [
     "Entretenimiento",
@@ -31,7 +28,6 @@ MODULOS_PERMITIDOS = [
     "General",
 ]
 
-# --- FUNCIONES DE DATOS ---
 def obtener_inventario():
     res = supabase.table("inventario_deposito").select("*").execute()
     df = pd.DataFrame(res.data)
@@ -70,7 +66,6 @@ def generar_pdf_remito(cliente, serie, cantidad, obs, articulo_nombre):
     p.setFont("Helvetica-Bold", 18)
     p.setFillColorRGB(0.12, 0.23, 0.54)
     p.drawCentredString(300, 750, "REMITO DE ENTREGA OFICIAL")
-
     p.setFont("Helvetica", 12)
     p.setFillColorRGB(0, 0, 0)
     p.drawString(50, 700, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
@@ -79,11 +74,9 @@ def generar_pdf_remito(cliente, serie, cantidad, obs, articulo_nombre):
     p.drawString(50, 625, f"Número de Serie: {serie}")
     p.drawString(50, 600, f"Cantidad: {cantidad} unidades")
     p.drawString(50, 575, f"Observaciones: {obs}")
-
     p.setLineWidth(1)
     p.line(50, 470, 250, 470)
     p.drawString(50, 450, "Firma del Receptor")
-
     p.showPage()
     p.save()
     buffer.seek(0)
@@ -100,7 +93,6 @@ def generar_excel_backup(df_inv, df_glosario, df_usuarios):
     buffer.seek(0)
     return buffer.getvalue()
 
-# --- SISTEMA DE LOGUEO ---
 if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = None
 
@@ -113,7 +105,6 @@ if st.session_state["usuario_actual"] is None:
             user_input = st.text_input("Usuario").strip()
             pass_input = st.text_input("Contraseña", type="password").strip()
             btn_login = st.form_submit_button("Ingresar", use_container_width=True)
-
             if btn_login:
                 lista_usuarios = obtener_usuarios()
                 encontrado = next(
@@ -127,7 +118,6 @@ if st.session_state["usuario_actual"] is None:
                     st.error("Usuario o contraseña incorrectos.")
     st.stop()
 
-# --- DATOS DE SESIÓN ACTIVA ---
 usuario = st.session_state["usuario_actual"]
 rol = usuario["rol"]
 
@@ -138,7 +128,6 @@ if st.sidebar.button("Cerrar Sesión", use_container_width=True):
     st.rerun()
 st.sidebar.divider()
 
-# --- MENÚ SEGÚN ROL ---
 if rol == "Revisor":
     menu = ["📊 Tablero e Inventario", "🤖 Asistente MIA (Consultas)", "📖 Glosario de Códigos"]
 elif rol == "Stock":
@@ -164,13 +153,9 @@ else:
 
 eleccion = st.sidebar.radio("Navegación", menu)
 
-# ==============================================================================
-# 1. TABLERO E INVENTARIO
-# ==============================================================================
 if eleccion == "📊 Tablero e Inventario":
     st.title("📦 Inventario General de Depósito")
     df = obtener_inventario()
-
     if df.empty:
         st.info("No hay artículos cargados todavía en el inventario.")
     else:
@@ -180,13 +165,11 @@ if eleccion == "📊 Tablero e Inventario":
         c3.metric("Módulos Activos", df["modulo"].nunique())
         a_revisar = len(df[df["estado"].isin(["A revisar", "Baja"])])
         c4.metric("A revisar / Baja", a_revisar)
-
         st.divider()
         f1, f2, f3 = st.columns(3)
         filtro_mod = f1.selectbox("Filtrar por Módulo:", ["Todos"] + MODULOS_PERMITIDOS)
         filtro_est = f2.selectbox("Filtrar por Estado:", ["Todos"] + ESTADOS_PERMITIDOS)
         busqueda = f3.text_input("Buscar por Serie o Artículo:")
-
         df_filtrado = df.copy()
         if filtro_mod != "Todos":
             df_filtrado = df_filtrado[df_filtrado["modulo"] == filtro_mod]
@@ -195,12 +178,8 @@ if eleccion == "📊 Tablero e Inventario":
         if busqueda:
             mask = df_filtrado.astype(str).apply(lambda x: x.str.contains(busqueda, case=False, na=False)).any(axis=1)
             df_filtrado = df_filtrado[mask]
-
         st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
 
-# ==============================================================================
-# 2. CARGA / INSERCIÓN DE STOCK (CON COLUMNA MÓDULO)
-# ==============================================================================
 elif eleccion == "➕ Carga / Inserción de Stock":
     st.title("➕ Carga / Inserción de Stock")
     with st.form("form_carga_stock", clear_on_submit=True):
@@ -211,7 +190,6 @@ elif eleccion == "➕ Carga / Inserción de Stock":
         cat = col2.text_input("Categoría:")
         est = col1.selectbox("Estado en Depósito:", ESTADOS_PERMITIDOS)
         cant = col2.number_input("Cantidad Inicial:", min_value=1, value=1, step=1)
-
         submitted = st.form_submit_button("Guardar Artículo en Stock", use_container_width=True)
         if submitted:
             if not cod.strip() or not nom.strip():
@@ -232,9 +210,6 @@ elif eleccion == "➕ Carga / Inserción de Stock":
                     supabase.table("inventario_deposito").insert(nuevo_item).execute()
                     st.success(f"✅ Artículo '{nom}' cargado correctamente en el módulo **{mod}**.")
 
-# ==============================================================================
-# 3. ENTREGAS Y REMITOS
-# ==============================================================================
 elif eleccion == "📤 Entregas y Remitos":
     st.title("📤 Despacho de Mercadería y Remitos")
     with st.form("form_entrega"):
@@ -243,8 +218,18 @@ elif eleccion == "📤 Entregas y Remitos":
         cantidad_entrega = st.number_input("Cantidad a entregar:", min_value=1, value=1, step=1)
         observaciones = st.text_area("Observaciones:")
         btn_entregar = st.form_submit_button("Confirmar Entrega y Generar Remito", use_container_width=True)
-
         if btn_entregar:
             if not cliente.strip() or not codigo_scan.strip():
                 st.error("Completá el receptor y el número de serie.")
             else:
+                res_item = supabase.table("inventario_deposito").select("*").eq("numero_serie", codigo_scan.strip()).execute()
+                if res_item.data:
+                    item = res_item.data[0]
+                    stock_actual = int(item["cantidad"])
+                    articulo_nombre = item["articulo"]
+                    if stock_actual >= cantidad_entrega:
+                        nueva_cantidad = stock_actual - cantidad_entrega
+                        supabase.table("inventario_deposito").update({"cantidad": nueva_cantidad}).eq("numero_serie", codigo_scan.strip()).execute()
+                        st.session_state["pdf_listo"] = generar_pdf_remito(
+                            cliente, codigo_scan.strip(), cantidad_entrega, observaciones, articulo_nombre
+                        )
