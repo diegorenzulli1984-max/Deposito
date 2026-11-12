@@ -4,36 +4,65 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from supabase import create_client, Client
 import io
+from datetime import datetime
 
-# 🔑 CONEXIÓN ESTABLECIDA CON TU BASE DE DATOS EN LA NUBE:
-SUPABASE_URL = "https://supabase.co"
-SUPABASE_KEY = "sb_publishable_WNWNgvGer-DBYdmNmfislw_rzj1b-x6"
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Control de Stock y Depósito", page_icon="📦", layout="wide")
 
+# --- CONEXIÓN A SUPABASE ---
 @st.cache_resource
 def iniciar_conexion():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase: Client = iniciar_conexion()
+
+# --- LISTAS MAESTRAS ---
+ESTADOS_PERMITIDOS = ["Nuevo", "Usado", "A revisar", "Baja", "Reciclaje"]
+MODULOS_PERMITIDOS = [
+    "Entretenimiento",
+    "Capacitación",
+    "Microcine",
+    "Robótica",
+    "Cartelería",
+    "Impresión 3D",
+    "Mobiliario",
+    "General",
+]
+
+# --- FUNCIONES DE DATOS ---
+def obtener_inventario():
+    res = supabase.table("inventario_deposito").select("*").execute()
+    df = pd.DataFrame(res.data)
+    if not df.empty and "modulo" not in df.columns:
+        df["modulo"] = "General"
+    elif not df.empty:
+        df["modulo"] = df["modulo"].fillna("General")
+    return df
+
+def obtener_usuarios():
+    usuarios_base = [
+        {"usuario": "admin", "clave": "Stock2026!", "rol": "Administrador", "nombre": "Responsable de Área"}
+    ]
     try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        res = supabase.table("usuarios_stock").select("*").execute()
+        if res.data:
+            for u in res.data:
+                if u["usuario"] != "admin":
+                    usuarios_base.append(u)
     except Exception:
-        return None
+        pass
+    return usuarios_base
 
-supabase = iniciar_conexion()
-
-st.set_page_config(page_title="Control de Stock", layout="wide")
-
-st.markdown("""
-    <style>
-    .block-container { padding-top: 2rem; }
-    h1 { color: #1E3A8A; font-family: 'Helvetica Neue', sans-serif; }
-    .metric-value { font-size: 2.5rem; font-weight: bold; color: #10B981; }
-    .metric-label { font-size: 1rem; color: #4B5563; }
-    .detalle-box { padding: 1.5rem; border-left: 5px solid #1E3A8A; background-color: #F3F4F6; margin-top: 1rem; border-radius: 4px; }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("📦 Control de Stock - Depósito Conectado")
-
-menu = ["📊 Panel de Informes", "🚚 Emitir Remito de Entrega", "➕ Alta/Modificación de Artículos"]
-eleccion = st.sidebar.radio("Navegación", menu)
+def obtener_glosario():
+    try:
+        res = supabase.table("glosario_codigos").select("*").execute()
+        if res.data:
+            return pd.DataFrame(res.data)
+    except Exception:
+        pass
+    return pd.DataFrame(columns=["codigo", "articulo", "modulo", "descripcion"])
 
 def generar_pdf_remito(cliente, serie, cantidad, obs, articulo_nombre):
     buffer = io.BytesIO()
@@ -41,175 +70,179 @@ def generar_pdf_remito(cliente, serie, cantidad, obs, articulo_nombre):
     p.setFont("Helvetica-Bold", 18)
     p.setFillColorRGB(0.12, 0.23, 0.54)
     p.drawCentredString(300, 750, "REMITO DE ENTREGA OFICIAL")
-    
+
     p.setFont("Helvetica", 12)
     p.setFillColorRGB(0, 0, 0)
-    p.drawString(50, 700, f"Cliente / Receptor de la entrega: {cliente}")
-    p.drawString(50, 670, f"Articulo Despachado: {articulo_nombre}")
-    p.drawString(50, 640, f"Numero de Serie: {serie}")
-    p.drawString(50, 610, f"Cantidad: {cantidad} unidades")
-    p.drawString(50, 580, f"Observaciones: {obs}")
-    
+    p.drawString(50, 700, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    p.drawString(50, 675, f"Cliente / Receptor de la entrega: {cliente}")
+    p.drawString(50, 650, f"Artículo Despachado: {articulo_nombre}")
+    p.drawString(50, 625, f"Número de Serie: {serie}")
+    p.drawString(50, 600, f"Cantidad: {cantidad} unidades")
+    p.drawString(50, 575, f"Observaciones: {obs}")
+
     p.setLineWidth(1)
-    p.line(50, 480, 250, 480)
-    p.drawString(50, 460, "Firma del Receptor")
-    
+    p.line(50, 470, 250, 470)
+    p.drawString(50, 450, "Firma del Receptor")
+
     p.showPage()
     p.save()
     buffer.seek(0)
     return buffer.getvalue()
 
-estados_permitidos = ["Nuevo", "Usado", "Baja", "Reciclaje"]
+def generar_excel_backup(df_inv, df_glosario, df_usuarios):
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_inv.to_excel(writer, sheet_name="Inventario_Actual", index=False)
+        df_glosario.to_excel(writer, sheet_name="Glosario_Codigos", index=False)
+        if not df_usuarios.empty:
+            df_u_seguro = df_usuarios.drop(columns=["clave"], errors="ignore")
+            df_u_seguro.to_excel(writer, sheet_name="Usuarios_Registrados", index=False)
+    buffer.seek(0)
+    return buffer.getvalue()
 
-def obtener_inventario_real():
-    columnas_vacias = ["Número de Serie", "Artículo", "Categoría", "Estado", "Cantidad", "Ubicación"]
-    if supabase is None:
-        return pd.DataFrame(columns=columnas_vacias)
-    try:
-        res = supabase.table("inventario_deposito").select("*").execute()
-        if not res.data:
-            return pd.DataFrame(columns=columnas_vacias)
-        
-        df = pd.DataFrame(res.data)
-        df = df.rename(columns={
-            "numero_serie": "Número de Serie",
-            "articulo": "Artículo",
-            "categoria": "Categoría",
-            "estado": "Estado",
-            "cantidad": "Cantidad",
-            "ubicacion": "Ubicación"
-        })
-        return df[columnas_vacias]
-    except Exception:
-        return pd.DataFrame(columns=columnas_vacias)
+# --- SISTEMA DE LOGUEO ---
+if "usuario_actual" not in st.session_state:
+    st.session_state["usuario_actual"] = None
 
-inventario_actual = obtener_inventario_real()
-
-if eleccion == "📊 Panel de Informes":
-    st.subheader("Estado General del Inventario en la Nube")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown('<p class="metric-label">Total de Unidades Disponibles</p>', unsafe_allow_html=True)
-        cant_total = inventario_actual["Cantidad"].sum() if "Cantidad" in inventario_actual.columns else 0
-        st.markdown(f'<p class="metric-value">{cant_total}</p>', unsafe_allow_html=True)
+if st.session_state["usuario_actual"] is None:
+    st.title("🔐 Acceso al Sistema de Control de Stock")
+    st.markdown("Ingresá tus credenciales asignadas por el responsable de área.")
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown('<p class="metric-label">Total de Artículos Únicos</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="metric-value">{len(inventario_actual)}</p>', unsafe_allow_html=True)
-    with col3:
-        st.markdown('<p class="metric-label">Artículos en Estado "Baja"</p>', unsafe_allow_html=True)
-        cant_baja = len(inventario_actual[inventario_actual["Estado"] == "Baja"]) if "Estado" in inventario_actual.columns else 0
-        st.markdown(f'<p class="metric-value" style="color: #EF4444;">{cant_baja}</p>', unsafe_allow_html=True)
-        
-    st.write("---")
-    
-    busqueda = st.text_input("🔍 Escanear Nro de Serie o buscar de forma predictiva:")
-    filtro_estado = st.multiselect("Filtrar informes por Estado en Depósito:", estados_permitidos)
-    
-    df_filtrado = inventario_actual
-    if filtro_estado and "Estado" in df_filtrado.columns:
-        df_filtrado = df_filtrado[df_filtrado["Estado"].isin(filtro_estado)]
-    if busqueda and "Número de Serie" in df_filtrado.columns:
-        df_filtrado = df_filtrado[
-            df_filtrado["Número de Serie"].astype(str).str.contains(busqueda) | 
-            df_filtrado["Artículo"].astype(str).str.contains(busqueda, case=False)
-        ]
-        
-    if not df_filtrado.empty and busqueda:
-        st.markdown("### 📋 Información del Artículo Seleccionado")
-        for _, fila in df_filtrado.iterrows():
-            st.markdown(f"""
-            <div class="detalle-box">
-                <strong>⚙️ Número de Serie:</strong> {fila['Número de Serie']}<br>
-                <strong>📦 Artículo:</strong> {fila['Artículo']}<br>
-                <strong>📁 Categoría:</strong> {fila['Categoría']}<br>
-                <strong>📌 Estado en Depósito:</strong> {fila['Estado']}<br>
-                <strong>🔢 Cantidad Disponible:</strong> {fila['Cantidad']} unidades<br>
-                <strong>📍 Ubicación Almacén:</strong> {fila['Ubicación']}
-            </div>
-            """, unsafe_allow_html=True)
-        st.write("---")
+        with st.form("form_login"):
+            user_input = st.text_input("Usuario").strip()
+            pass_input = st.text_input("Contraseña", type="password").strip()
+            btn_login = st.form_submit_button("Ingresar", use_container_width=True)
 
-    st.dataframe(df_filtrado, use_container_width=True)
-    
-    if not inventario_actual.empty:
-        buffer_excel = io.BytesIO()
-        with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-            inventario_actual.to_excel(writer, index=False, sheet_name="Inventario")
-        st.download_button(label="📥 Exportar Inventario Completo a Excel", data=buffer_excel.getvalue(), file_name="inventario_stock.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-elif eleccion == "🚚 Emitir Remito de Entrega":
-    st.subheader("Generación de Remito Oficial")
-    
-    with st.form("formulario_remito", clear_on_submit=False):
-        cliente = st.text_input("Cliente / Receptor de la entrega:")
-        codigo_scan = st.text_input("Pistola Láser (Hacé clic acá antes de escanear):")
-        cantidad_entrega = st.number_input("Cantidad a entregar:", min_value=1, step=1)
-        observaciones = st.text_area("Notas / Observaciones del remito:")
-        emitir = st.form_submit_button("Validar y Procesar Remito")
-        
-    if emitir:
-        if not cliente or not codigo_scan:
-            st.error("Por favor, completa el nombre del cliente y escanea un número de serie válido.")
-        elif supabase is None:
-            st.error("No hay conexión activa con la base de datos.")
-        else:
-            res_item = supabase.table("inventario_deposito").select("*").eq("numero_serie", codigo_scan).execute()
-            if res_item.data:
-                item = res_item.data[0] if isinstance(res_item.data, list) else res_item.data
-                stock_actual = int(item["cantidad"])
-                articulo_nombre = item["articulo"]
-                
-                if stock_actual >= cantidad_entrega:
-                    nueva_cantidad = stock_actual - cantidad_entrega
-                    supabase.table("inventario_deposito").update({"cantidad": nueva_cantidad}).eq("numero_serie", codigo_scan).execute()
-                    
-                    st.session_state["pdf_listo"] = generar_pdf_remito(cliente, codigo_scan, cantidad_entrega, observaciones, articulo_nombre)
-                    st.session_state["cliente_remito"] = cliente
-                    st.success(f"¡Sincronizado! Stock descontado en la nube. Quedan {nueva_cantidad} unidades de {articulo_nombre}.")
+            if btn_login:
+                lista_usuarios = obtener_usuarios()
+                encontrado = next(
+                    (u for u in lista_usuarios if u["usuario"] == user_input and u["clave"] == pass_input),
+                    None,
+                )
+                if encontrado:
+                    st.session_state["usuario_actual"] = encontrado
+                    st.rerun()
                 else:
-                    st.error(f"Stock insuficiente en internet. Solo quedan {stock_actual} unidades de {articulo_nombre}.")
+                    st.error("Usuario o contraseña incorrectos.")
+    st.stop()
+
+# --- DATOS DE SESIÓN ACTIVA ---
+usuario = st.session_state["usuario_actual"]
+rol = usuario["rol"]
+
+st.sidebar.markdown(f"👤 **{usuario.get('nombre', usuario['usuario'])}**")
+st.sidebar.caption(f"Rol: **{rol}**")
+if st.sidebar.button("Cerrar Sesión", use_container_width=True):
+    st.session_state["usuario_actual"] = None
+    st.rerun()
+st.sidebar.divider()
+
+# --- MENÚ SEGÚN ROL ---
+if rol == "Revisor":
+    menu = ["📊 Tablero e Inventario", "🤖 Asistente MIA (Consultas)", "📖 Glosario de Códigos"]
+elif rol == "Stock":
+    menu = [
+        "📊 Tablero e Inventario",
+        "➕ Carga / Inserción de Stock",
+        "📤 Entregas y Remitos",
+        "✏️ Editar / Actualizar Stock",
+        "🤖 Asistente MIA (Consultas)",
+        "📖 Glosario de Códigos",
+    ]
+else:  # Administrador
+    menu = [
+        "📊 Tablero e Inventario",
+        "➕ Carga / Inserción de Stock",
+        "📤 Entregas y Remitos",
+        "✏️ Editar / Actualizar Stock",
+        "🤖 Asistente MIA (Consultas)",
+        "📖 Glosario de Códigos",
+        "💾 Backup Oficina",
+        "👥 Administrar Usuarios",
+    ]
+
+eleccion = st.sidebar.radio("Navegación", menu)
+
+# ==============================================================================
+# 1. TABLERO E INVENTARIO
+# ==============================================================================
+if eleccion == "📊 Tablero e Inventario":
+    st.title("📦 Inventario General de Depósito")
+    df = obtener_inventario()
+
+    if df.empty:
+        st.info("No hay artículos cargados todavía en el inventario.")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Artículos Registrados", len(df))
+        c2.metric("Unidades Totales", int(df["cantidad"].sum()))
+        c3.metric("Módulos Activos", df["modulo"].nunique())
+        a_revisar = len(df[df["estado"].isin(["A revisar", "Baja"])])
+        c4.metric("A revisar / Baja", a_revisar)
+
+        st.divider()
+        f1, f2, f3 = st.columns(3)
+        filtro_mod = f1.selectbox("Filtrar por Módulo:", ["Todos"] + MODULOS_PERMITIDOS)
+        filtro_est = f2.selectbox("Filtrar por Estado:", ["Todos"] + ESTADOS_PERMITIDOS)
+        busqueda = f3.text_input("Buscar por Serie o Artículo:")
+
+        df_filtrado = df.copy()
+        if filtro_mod != "Todos":
+            df_filtrado = df_filtrado[df_filtrado["modulo"] == filtro_mod]
+        if filtro_est != "Todos":
+            df_filtrado = df_filtrado[df_filtrado["estado"] == filtro_est]
+        if busqueda:
+            mask = df_filtrado.astype(str).apply(lambda x: x.str.contains(busqueda, case=False, na=False)).any(axis=1)
+            df_filtrado = df_filtrado[mask]
+
+        st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
+
+# ==============================================================================
+# 2. CARGA / INSERCIÓN DE STOCK (CON COLUMNA MÓDULO)
+# ==============================================================================
+elif eleccion == "➕ Carga / Inserción de Stock":
+    st.title("➕ Carga / Inserción de Stock")
+    with st.form("form_carga_stock", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        cod = col1.text_input("Número de Serie / Código *:")
+        nom = col2.text_input("Nombre del Artículo *:")
+        mod = col1.selectbox("Módulo *:", MODULOS_PERMITIDOS)
+        cat = col2.text_input("Categoría:")
+        est = col1.selectbox("Estado en Depósito:", ESTADOS_PERMITIDOS)
+        cant = col2.number_input("Cantidad Inicial:", min_value=1, value=1, step=1)
+
+        submitted = st.form_submit_button("Guardar Artículo en Stock", use_container_width=True)
+        if submitted:
+            if not cod.strip() or not nom.strip():
+                st.error("El Número de Serie y el Nombre del Artículo son obligatorios.")
             else:
-                st.error("El Número de Serie escaneado no existe en la base de datos de internet.")
+                existe = supabase.table("inventario_deposito").select("numero_serie").eq("numero_serie", cod.strip()).execute()
+                if existe.data:
+                    st.warning("Ese Número de Serie ya existe. Usá la pestaña 'Editar / Actualizar Stock' para sumar unidades.")
+                else:
+                    nuevo_item = {
+                        "numero_serie": cod.strip(),
+                        "articulo": nom.strip(),
+                        "modulo": mod,
+                        "categoria": cat.strip(),
+                        "estado": est,
+                        "cantidad": int(cant),
+                    }
+                    supabase.table("inventario_deposito").insert(nuevo_item).execute()
+                    st.success(f"✅ Artículo '{nom}' cargado correctamente en el módulo **{mod}**.")
 
-    if "pdf_listo" in st.session_state:
-        st.write("---")
-        st.download_button(
-            label="📥 Descargar e Imprimir Remito en PDF", 
-            data=st.session_state["pdf_listo"], 
-            file_name=f"remito_{st.session_state['cliente_remito']}.pdf", 
-            mime="application/pdf"
-        )
+# ==============================================================================
+# 3. ENTREGAS Y REMITOS
+# ==============================================================================
+elif eleccion == "📤 Entregas y Remitos":
+    st.title("📤 Despacho de Mercadería y Remitos")
+    with st.form("form_entrega"):
+        cliente = st.text_input("Cliente / Receptor de la entrega:")
+        codigo_scan = st.text_input("Número de Serie escaneado o ingresado:")
+        cantidad_entrega = st.number_input("Cantidad a entregar:", min_value=1, value=1, step=1)
+        observaciones = st.text_area("Observaciones:")
+        btn_entregar = st.form_submit_button("Confirmar Entrega y Generar Remito", use_container_width=True)
 
-elif eleccion == "➕ Alta/Modificación de Artículos":
-    st.subheader("Administración de Productos")
-    
-    st.markdown("### 📥 Carga masiva desde planilla Excel")
-    archivo_subido = st.file_uploader("Seleccioná tu archivo .xlsx", type=["xlsx"])
-    if archivo_subido is not None and supabase is not None:
-        try:
-            df_excel = pd.read_excel(archivo_subido)
-            contador_cargas = 0
-            for _, fila in df_excel.iterrows():
-                datos_db = {
-                    "numero_serie": str(fila["Número de Serie"]),
-                    "articulo": str(fila["Artículo"]),
-                    "categoria": str(fila["Categoría"]),
-                    "estado": str(fila["Estado"]),
-                    "cantidad": int(fila["Cantidad"]),
-                    "ubicacion": str(fila["Ubicación"])
-                }
-                supabase.table("inventario_deposito").upsert(datos_db, on_conflict="numero_serie").execute()
-                contador_cargas += 1
-            st.success(f"¡Éxito! Se subieron e integraron {contador_cargas} artículos desde el Excel a la nube.")
-        except Exception as e:
-            st.error(f"Error al procesar el Excel: {e}.")
-            
-    st.write("---")
-    st.markdown("### ➕ Carga Manual de un Artículo")
-    with st.form("alta_articulo", clear_on_submit=True):
-        cod = st.text_input("Número de Serie:")
-        nom = st.text_input("Nombre del Artículo:")
-        cat = st.text_input("Categoría:")
-        est = st.selectbox("Estado en Depósito:", estados_permitidos)
-
+        if btn_entregar:
+            if not cliente.strip() or not codigo_scan.strip():
