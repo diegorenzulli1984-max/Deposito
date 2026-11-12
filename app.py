@@ -2,19 +2,15 @@ import streamlit as st
 import pandas as pd
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from supabase import create_client, Client
 import io
+import os
 from datetime import datetime
 
 st.set_page_config(page_title="Control de Stock y Depósito", page_icon="📦", layout="wide")
 
-@st.cache_resource
-def iniciar_conexion():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
-
-supabase: Client = iniciar_conexion()
+ARCHIVO_INV = "inventario_deposito.csv"
+ARCHIVO_USU = "usuarios_stock.csv"
+ARCHIVO_GLO = "glosario_codigos.csv"
 
 ESTADOS_PERMITIDOS = ["Nuevo", "Usado", "A revisar", "Baja", "Reciclaje"]
 MODULOS_PERMITIDOS = [
@@ -29,36 +25,39 @@ MODULOS_PERMITIDOS = [
 ]
 
 def obtener_inventario():
-    res = supabase.table("inventario_deposito").select("*").execute()
-    df = pd.DataFrame(res.data)
-    if not df.empty and "modulo" not in df.columns:
-        df["modulo"] = "General"
-    elif not df.empty:
+    if os.path.exists(ARCHIVO_INV):
+        df = pd.read_csv(ARCHIVO_INV, dtype={"numero_serie": str})
+        if "modulo" not in df.columns:
+            df["modulo"] = "General"
         df["modulo"] = df["modulo"].fillna("General")
-    return df
+        return df
+    return pd.DataFrame(columns=["numero_serie", "articulo", "modulo", "categoria", "estado", "cantidad"])
+
+def guardar_inventario(df):
+    df.to_csv(ARCHIVO_INV, index=False)
 
 def obtener_usuarios():
     usuarios_base = [
         {"usuario": "admin", "clave": "Stock2026!", "rol": "Administrador", "nombre": "Responsable de Área"}
     ]
-    try:
-        res = supabase.table("usuarios_stock").select("*").execute()
-        if res.data:
-            for u in res.data:
-                if u["usuario"] != "admin":
-                    usuarios_base.append(u)
-    except Exception:
-        pass
+    if os.path.exists(ARCHIVO_USU):
+        df_u = pd.read_csv(ARCHIVO_USU, dtype=str)
+        for _, row in df_u.iterrows():
+            if row["usuario"] != "admin":
+                usuarios_base.append(row.to_dict())
     return usuarios_base
 
+def guardar_usuarios(lista_usuarios):
+    df_u = pd.DataFrame(lista_usuarios)
+    df_u.to_csv(ARCHIVO_USU, index=False)
+
 def obtener_glosario():
-    try:
-        res = supabase.table("glosario_codigos").select("*").execute()
-        if res.data:
-            return pd.DataFrame(res.data)
-    except Exception:
-        pass
+    if os.path.exists(ARCHIVO_GLO):
+        return pd.read_csv(ARCHIVO_GLO, dtype=str).fillna("")
     return pd.DataFrame(columns=["codigo", "articulo", "modulo", "descripcion"])
+
+def guardar_glosario(df_g):
+    df_g.to_csv(ARCHIVO_GLO, index=False)
 
 def generar_pdf_remito(cliente, serie, cantidad, obs, articulo_nombre):
     buffer = io.BytesIO()
@@ -88,18 +87,18 @@ def generar_excel_backup(df_inv, df_glosario, df_usuarios):
         df_inv.to_excel(writer, sheet_name="Inventario_Actual", index=False)
         df_glosario.to_excel(writer, sheet_name="Glosario_Codigos", index=False)
         if not df_usuarios.empty:
-            df_u_seguro = df_usuarios.drop(columns=["clave"], errors="ignore")
-            df_u_seguro.to_excel(writer, sheet_name="Usuarios_Registrados", index=False)
+            df_usuarios.to_excel(writer, sheet_name="Usuarios_Registrados", index=False)
     buffer.seek(0)
     return buffer.getvalue()
 
+# --- SISTEMA DE LOGUEO ---
 if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = None
 
 if st.session_state["usuario_actual"] is None:
     st.title("🔐 Acceso al Sistema de Control de Stock")
     st.markdown("Ingresá tus credenciales asignadas por el responsable de área.")
-    col1, col2, col3 = st.columns([1, 2, 1])
+    col1, col2, col3 = st.columns()
     with col2:
         with st.form("form_login"):
             user_input = st.text_input("Usuario").strip()
@@ -157,7 +156,7 @@ if eleccion == "📊 Tablero e Inventario":
     st.title("📦 Inventario General de Depósito")
     df = obtener_inventario()
     if df.empty:
-        st.info("No hay artículos cargados todavía en el inventario.")
+        st.info("No hay artículos cargados todavía. Podés cargar uno en 'Carga / Inserción de Stock' o restaurar un Excel en 'Backup Oficina'.")
     else:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Artículos Registrados", len(df))
@@ -195,19 +194,20 @@ elif eleccion == "➕ Carga / Inserción de Stock":
             if not cod.strip() or not nom.strip():
                 st.error("El Número de Serie y el Nombre del Artículo son obligatorios.")
             else:
-                existe = supabase.table("inventario_deposito").select("numero_serie").eq("numero_serie", cod.strip()).execute()
-                if existe.data:
-                    st.warning("Ese Número de Serie ya existe. Usá la pestaña 'Editar / Actualizar Stock' para sumar unidades.")
+                df = obtener_inventario()
+                if not df.empty and cod.strip() in df["numero_serie"].values:
+                    st.warning("Ese Número de Serie ya existe. Usá 'Editar / Actualizar Stock' para sumar unidades.")
                 else:
-                    nuevo_item = {
+                    nuevo_df = pd.DataFrame([{
                         "numero_serie": cod.strip(),
                         "articulo": nom.strip(),
                         "modulo": mod,
                         "categoria": cat.strip(),
                         "estado": est,
                         "cantidad": int(cant),
-                    }
-                    supabase.table("inventario_deposito").insert(nuevo_item).execute()
+                    }])
+                    df = pd.concat([df, nuevo_df], ignore_index=True)
+                    guardar_inventario(df)
                     st.success(f"✅ Artículo '{nom}' cargado correctamente en el módulo **{mod}**.")
 
 elif eleccion == "📤 Entregas y Remitos":
@@ -222,14 +222,13 @@ elif eleccion == "📤 Entregas y Remitos":
             if not cliente.strip() or not codigo_scan.strip():
                 st.error("Completá el receptor y el número de serie.")
             else:
-                res_item = supabase.table("inventario_deposito").select("*").eq("numero_serie", codigo_scan.strip()).execute()
-                if res_item.data:
-                    item = res_item.data[0]
-                    stock_actual = int(item["cantidad"])
-                    articulo_nombre = item["articulo"]
+                df = obtener_inventario()
+                if not df.empty and codigo_scan.strip() in df["numero_serie"].values:
+                    idx = df.index[df["numero_serie"] == codigo_scan.strip()]
+                    stock_actual = int(df.at[idx, "cantidad"])
+                    articulo_nombre = str(df.at[idx, "articulo"])
                     if stock_actual >= cantidad_entrega:
                         nueva_cantidad = stock_actual - cantidad_entrega
-                        supabase.table("inventario_deposito").update({"cantidad": nueva_cantidad}).eq("numero_serie", codigo_scan.strip()).execute()
+                        df.at[idx, "cantidad"] = nueva_cantidad
+                        guardar_inventario(df)
                         st.session_state["pdf_listo"] = generar_pdf_remito(
-                            cliente, codigo_scan.strip(), cantidad_entrega, observaciones, articulo_nombre
-                        )
