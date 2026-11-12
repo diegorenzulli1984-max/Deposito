@@ -13,16 +13,7 @@ ARCHIVO_USU = "usuarios_stock.csv"
 ARCHIVO_GLO = "glosario_codigos.csv"
 
 ESTADOS_PERMITIDOS = ["Nuevo", "Usado", "A revisar", "Baja", "Reciclaje"]
-MODULOS_PERMITIDOS = [
-    "Entretenimiento",
-    "Capacitación",
-    "Microcine",
-    "Robótica",
-    "Cartelería",
-    "Impresión 3D",
-    "Mobiliario",
-    "General",
-]
+MODULOS_PERMITIDOS = ["Entretenimiento", "Capacitación", "Microcine", "Robótica", "Cartelería", "Impresión 3D", "Mobiliario", "General"]
 
 def obtener_inventario():
     if os.path.exists(ARCHIVO_INV):
@@ -38,9 +29,7 @@ def guardar_inventario(df):
     df.to_csv(ARCHIVO_INV, index=False)
 
 def obtener_usuarios():
-    usuarios_base = [
-        {"usuario": "admin", "clave": "Stock2026!", "rol": "Administrador", "nombre": "Responsable de Área"}
-    ]
+    usuarios_base = [{"usuario": "admin", "clave": "Stock2026!", "rol": "Administrador", "nombre": "Responsable de Área"}]
     if os.path.exists(ARCHIVO_USU):
         df_u = pd.read_csv(ARCHIVO_USU, dtype=str).fillna("")
         for _, row in df_u.iterrows():
@@ -92,7 +81,6 @@ def generar_excel_backup(df_inv, df_glosario, df_usuarios):
     buffer.seek(0)
     return buffer.getvalue()
 
-# --- LOGIN ---
 if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = None
 
@@ -115,7 +103,6 @@ if st.session_state["usuario_actual"] is None:
                     st.error("Usuario o contraseña incorrectos.")
     st.stop()
 
-# --- ENCABEZADO SUPERIOR ---
 usuario = st.session_state["usuario_actual"]
 rol = usuario["rol"]
 
@@ -128,7 +115,6 @@ with h2:
         st.session_state["usuario_actual"] = None
         st.rerun()
 
-# --- FUNCIONES DE CADA SECCIÓN ---
 def vista_inventario():
     df = obtener_inventario()
     if df.empty:
@@ -174,14 +160,7 @@ def vista_carga():
                 if not df.empty and cod.strip() in df["numero_serie"].values:
                     st.warning("Ese Número de Serie ya existe. Usá la pestaña 'Editar Stock' para sumar unidades.")
                 else:
-                    nuevo_df = pd.DataFrame([{
-                        "numero_serie": cod.strip(),
-                        "articulo": nom.strip(),
-                        "modulo": mod,
-                        "categoria": cat.strip(),
-                        "estado": est,
-                        "cantidad": int(cant),
-                    }])
+                    nuevo_df = pd.DataFrame([{"numero_serie": cod.strip(), "articulo": nom.strip(), "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)}])
                     df = pd.concat([df, nuevo_df], ignore_index=True)
                     guardar_inventario(df)
                     st.success(f"✅ Artículo '{nom}' cargado correctamente en el módulo **{mod}**.")
@@ -218,6 +197,10 @@ def vista_entregas():
                     st.error("El Número de Serie ingresado no existe en el inventario.")
     if "pdf_listo" in st.session_state:
         st.divider()
-        st.download_button(
-            label="📄 Descargar Remito Oficial en PDF",
-            data=st.session_state["pdf_listo"],
+        nombre_pdf = f"Remito_{st.session_state.get('cliente_remito', 'Entrega')}.pdf"
+        st.download_button("📄 Descargar Remito Oficial en PDF", data=st.session_state["pdf_listo"], file_name=nombre_pdf, mime="application/pdf", use_container_width=True)
+
+def vista_editar():
+    st.subheader("✏️ Modificar Artículo o Ajustar Cantidades")
+    df = obtener_inventario()
+    if df.empty:
