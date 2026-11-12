@@ -29,7 +29,7 @@ def cargar_usu():
             d = r.to_dict()
             d["permisos"] = d.get("permisos") or "|".join(VISTAS[:3])
             if d["usuario"] == "admin":
-                base = d
+                base[0] = d
             else:
                 base.append(d)
     return base
@@ -77,11 +77,14 @@ c_tit.markdown(f"### 📦 Control de Stock — {usr.get('nombre', usr['usuario']
 
 with c_menu:
     with st.popover(f"👤 {usr['usuario']}"):
-        nombre_mostrar = usr.get("nombre", usr["usuario"]).replace(" ", "+")
-        avatar_url = f"https://ui-avatars.com{nombre_mostrar}&background=1D4ED8&color=fff&rounded=true&size=64"
+        palabras = usr.get("nombre", usr["usuario"]).strip().split()
+        iniciales = "".join([p[0].upper() for p in palabras[:2]]) if palabras else "US"
         
         col_img, col_info = st.columns([1, 2.5])
-        col_img.image(avatar_url, width=48)
+        col_img.markdown(
+            f"""<div style="width:46px;height:46px;border-radius:50%;background-color:#1D4ED8;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:17px;">{iniciales}</div>""",
+            unsafe_allow_html=True
+        )
         col_info.markdown(f"**{usr.get('nombre', usr['usuario'])}**\n\n`{usr['rol']}`")
         
         st.divider()
