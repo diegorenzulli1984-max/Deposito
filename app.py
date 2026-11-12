@@ -91,14 +91,13 @@ def generar_excel_backup(df_inv, df_glosario, df_usuarios):
     buffer.seek(0)
     return buffer.getvalue()
 
-# --- SISTEMA DE LOGUEO ---
 if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = None
 
 if st.session_state["usuario_actual"] is None:
     st.title("🔐 Acceso al Sistema de Control de Stock")
     st.markdown("Ingresá tus credenciales asignadas por el responsable de área.")
-    col1, col2, col3 = st.columns()
+    col1, col2, col3 = st.columns(3)
     with col2:
         with st.form("form_login"):
             user_input = st.text_input("Usuario").strip()
@@ -106,10 +105,7 @@ if st.session_state["usuario_actual"] is None:
             btn_login = st.form_submit_button("Ingresar", use_container_width=True)
             if btn_login:
                 lista_usuarios = obtener_usuarios()
-                encontrado = next(
-                    (u for u in lista_usuarios if u["usuario"] == user_input and u["clave"] == pass_input),
-                    None,
-                )
+                encontrado = next((u for u in lista_usuarios if u["usuario"] == user_input and u["clave"] == pass_input), None)
                 if encontrado:
                     st.session_state["usuario_actual"] = encontrado
                     st.rerun()
@@ -224,11 +220,12 @@ elif eleccion == "📤 Entregas y Remitos":
             else:
                 df = obtener_inventario()
                 if not df.empty and codigo_scan.strip() in df["numero_serie"].values:
-                    idx = df.index[df["numero_serie"] == codigo_scan.strip()]
+                    idx = df.index[df["numero_serie"] == codigo_scan.strip()][0]
                     stock_actual = int(df.at[idx, "cantidad"])
                     articulo_nombre = str(df.at[idx, "articulo"])
                     if stock_actual >= cantidad_entrega:
                         nueva_cantidad = stock_actual - cantidad_entrega
                         df.at[idx, "cantidad"] = nueva_cantidad
                         guardar_inventario(df)
-                        st.session_state["pdf_listo"] = generar_pdf_remito(
+                        pdf_bytes = generar_pdf_remito(cliente, codigo_scan.strip(), cantidad_entrega, observaciones, articulo_nombre)
+                        st.session_state["pdf_listo"] = pdf_bytes
