@@ -30,6 +30,7 @@ def obtener_inventario():
         if "modulo" not in df.columns:
             df["modulo"] = "General"
         df["modulo"] = df["modulo"].fillna("General")
+        df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce").fillna(0).astype(int)
         return df
     return pd.DataFrame(columns=["numero_serie", "articulo", "modulo", "categoria", "estado", "cantidad"])
 
@@ -41,7 +42,7 @@ def obtener_usuarios():
         {"usuario": "admin", "clave": "Stock2026!", "rol": "Administrador", "nombre": "Responsable de Área"}
     ]
     if os.path.exists(ARCHIVO_USU):
-        df_u = pd.read_csv(ARCHIVO_USU, dtype=str)
+        df_u = pd.read_csv(ARCHIVO_USU, dtype=str).fillna("")
         for _, row in df_u.iterrows():
             if row["usuario"] != "admin":
                 usuarios_base.append(row.to_dict())
@@ -91,6 +92,7 @@ def generar_excel_backup(df_inv, df_glosario, df_usuarios):
     buffer.seek(0)
     return buffer.getvalue()
 
+# --- LOGIN ---
 if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = None
 
@@ -113,46 +115,24 @@ if st.session_state["usuario_actual"] is None:
                     st.error("Usuario o contraseña incorrectos.")
     st.stop()
 
+# --- ENCABEZADO SUPERIOR ---
 usuario = st.session_state["usuario_actual"]
 rol = usuario["rol"]
 
-st.sidebar.markdown(f"👤 **{usuario.get('nombre', usuario['usuario'])}**")
-st.sidebar.caption(f"Rol: **{rol}**")
-if st.sidebar.button("Cerrar Sesión", use_container_width=True):
-    st.session_state["usuario_actual"] = None
-    st.rerun()
-st.sidebar.divider()
+h1, h2 = st.columns([4, 1])
+h1.title("📦 Control de Stock y Depósito")
+h1.caption(f"👤 Sesión activa: **{usuario.get('nombre', usuario['usuario'])}** | Permisos: **{rol}**")
+with h2:
+    st.write("")
+    if st.button("Cerrar Sesión", use_container_width=True):
+        st.session_state["usuario_actual"] = None
+        st.rerun()
 
-if rol == "Revisor":
-    menu = ["📊 Tablero e Inventario", "🤖 Asistente MIA (Consultas)", "📖 Glosario de Códigos"]
-elif rol == "Stock":
-    menu = [
-        "📊 Tablero e Inventario",
-        "➕ Carga / Inserción de Stock",
-        "📤 Entregas y Remitos",
-        "✏️ Editar / Actualizar Stock",
-        "🤖 Asistente MIA (Consultas)",
-        "📖 Glosario de Códigos",
-    ]
-else:
-    menu = [
-        "📊 Tablero e Inventario",
-        "➕ Carga / Inserción de Stock",
-        "📤 Entregas y Remitos",
-        "✏️ Editar / Actualizar Stock",
-        "🤖 Asistente MIA (Consultas)",
-        "📖 Glosario de Códigos",
-        "💾 Backup Oficina",
-        "👥 Administrar Usuarios",
-    ]
-
-eleccion = st.sidebar.radio("Navegación", menu)
-
-if eleccion == "📊 Tablero e Inventario":
-    st.title("📦 Inventario General de Depósito")
+# --- FUNCIONES DE CADA SECCIÓN ---
+def vista_inventario():
     df = obtener_inventario()
     if df.empty:
-        st.info("No hay artículos cargados todavía. Podés cargar uno en 'Carga / Inserción de Stock' o restaurar un Excel en 'Backup Oficina'.")
+        st.info("No hay artículos cargados todavía. Usá la pestaña 'Carga de Stock' o restaurá un Excel desde 'Backup Oficina'.")
     else:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Artículos Registrados", len(df))
@@ -175,8 +155,8 @@ if eleccion == "📊 Tablero e Inventario":
             df_filtrado = df_filtrado[mask]
         st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
 
-elif eleccion == "➕ Carga / Inserción de Stock":
-    st.title("➕ Carga / Inserción de Stock")
+def vista_carga():
+    st.subheader("➕ Carga / Inserción de Stock")
     with st.form("form_carga_stock", clear_on_submit=True):
         col1, col2 = st.columns(2)
         cod = col1.text_input("Número de Serie / Código *:")
@@ -192,7 +172,7 @@ elif eleccion == "➕ Carga / Inserción de Stock":
             else:
                 df = obtener_inventario()
                 if not df.empty and cod.strip() in df["numero_serie"].values:
-                    st.warning("Ese Número de Serie ya existe. Usá 'Editar / Actualizar Stock' para sumar unidades.")
+                    st.warning("Ese Número de Serie ya existe. Usá la pestaña 'Editar Stock' para sumar unidades.")
                 else:
                     nuevo_df = pd.DataFrame([{
                         "numero_serie": cod.strip(),
@@ -206,8 +186,8 @@ elif eleccion == "➕ Carga / Inserción de Stock":
                     guardar_inventario(df)
                     st.success(f"✅ Artículo '{nom}' cargado correctamente en el módulo **{mod}**.")
 
-elif eleccion == "📤 Entregas y Remitos":
-    st.title("📤 Despacho de Mercadería y Remitos")
+def vista_entregas():
+    st.subheader("📤 Despacho de Mercadería y Remitos")
     with st.form("form_entrega"):
         cliente = st.text_input("Cliente / Receptor de la entrega:")
         codigo_scan = st.text_input("Número de Serie escaneado o ingresado:")
@@ -219,8 +199,9 @@ elif eleccion == "📤 Entregas y Remitos":
                 st.error("Completá el receptor y el número de serie.")
             else:
                 df = obtener_inventario()
-                if not df.empty and codigo_scan.strip() in df["numero_serie"].values:
-                    idx = df.index[df["numero_serie"] == codigo_scan.strip()][0]
+                coincidencias = df.index[df["numero_serie"] == codigo_scan.strip()].tolist()
+                if coincidencias:
+                    idx = coincidencias[0]
                     stock_actual = int(df.at[idx, "cantidad"])
                     articulo_nombre = str(df.at[idx, "articulo"])
                     if stock_actual >= cantidad_entrega:
@@ -229,3 +210,14 @@ elif eleccion == "📤 Entregas y Remitos":
                         guardar_inventario(df)
                         pdf_bytes = generar_pdf_remito(cliente, codigo_scan.strip(), cantidad_entrega, observaciones, articulo_nombre)
                         st.session_state["pdf_listo"] = pdf_bytes
+                        st.session_state["cliente_remito"] = cliente
+                        st.success(f"¡Stock descontado! Quedan {nueva_cantidad} unidades de {articulo_nombre}.")
+                    else:
+                        st.error(f"Stock insuficiente. Solo hay {stock_actual} unidades disponibles.")
+                else:
+                    st.error("El Número de Serie ingresado no existe en el inventario.")
+    if "pdf_listo" in st.session_state:
+        st.divider()
+        st.download_button(
+            label="📄 Descargar Remito Oficial en PDF",
+            data=st.session_state["pdf_listo"],
