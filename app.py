@@ -24,10 +24,23 @@ def cargar_inv():
 def cargar_usu():
     base = [{"usuario": "admin", "clave": "Stock2026!", "rol": "Administrador", "nombre": "Responsable de Área", "permisos": "|".join(VISTAS)}]
     if os.path.exists(F_USU):
-        for _, r in pd.read_csv(F_USU, dtype=str).fillna("").iterrows():
-            if r["usuario"] != "admin":
-                d = r.to_dict(); d["permisos"] = d.get("permisos") or "|".join(VISTAS[:3]); base.append(d)
+        df_u = pd.read_csv(F_USU, dtype=str).fillna("")
+        for _, r in df_u.iterrows():
+            d = r.to_dict()
+            d["permisos"] = d.get("permisos") or "|".join(VISTAS[:3])
+            if d["usuario"] == "admin":
+                base[0] = d
+            else:
+                base.append(d)
     return base
+
+def cambiar_clave_usuario(usuario_actual, nueva_clave):
+    lista_usuarios = cargar_usu()
+    for u in lista_usuarios:
+        if u["usuario"] == usuario_actual:
+            u["clave"] = nueva_clave
+            break
+    pd.DataFrame(lista_usuarios).to_csv(F_USU, index=False)
 
 def cargar_glo():
     return pd.read_csv(F_GLO, dtype=str).fillna("") if os.path.exists(F_GLO) else pd.DataFrame(columns=["codigo", "articulo", "modulo", "descripcion"])
@@ -57,9 +70,35 @@ if not st.session_state["user"]:
 
 usr = st.session_state["user"]
 opciones = [v for v in VISTAS if v in usr.get("permisos", "").split("|")] or ["📊 Inventario"]
-c_tit, c_salir = st.columns([4, 1])
+
+# --- ENCABEZADO Y MENÚ DE USUARIO ---
+c_tit, c_menu = st.columns([3.5, 1.5])
 c_tit.markdown(f"### 📦 Control de Stock — {usr.get('nombre', usr['usuario'])} `{usr['rol']}`")
-if c_salir.button("Cerrar Sesión", use_container_width=True): st.session_state["user"] = None; st.rerun()
+
+with c_menu:
+    with st.popover(f"👤 {usr['usuario']} ▾", use_container_width=True):
+        st.markdown(f"**{usr.get('nombre', usr['usuario'])}**")
+        st.caption(f"Rol: {usr['rol']}")
+        st.divider()
+        with st.expander("🔑 Cambiar contraseña"):
+            c_act = st.text_input("Clave actual:", type="password", key="c_act")
+            c_nva = st.text_input("Nueva clave:", type="password", key="c_nva")
+            c_rep = st.text_input("Repetir nueva clave:", type="password", key="c_rep")
+            if st.button("Guardar clave", type="primary", use_container_width=True):
+                if c_act != usr["clave"]:
+                    st.error("La clave actual no es correcta.")
+                elif len(c_nva.strip()) < 4:
+                    st.warning("La clave debe tener al menos 4 caracteres.")
+                elif c_nva != c_rep:
+                    st.error("Las claves nuevas no coinciden.")
+                else:
+                    cambiar_clave_usuario(usr["usuario"], c_nva.strip())
+                    st.session_state["user"]["clave"] = c_nva.strip()
+                    st.success("✅ Clave actualizada.")
+        st.divider()
+        if st.button("🚪 Cerrar Sesión", use_container_width=True):
+            st.session_state["user"] = None
+            st.rerun()
 
 cols_nav = st.columns(len(opciones))
 for i, op in enumerate(opciones):
