@@ -150,7 +150,7 @@ elif rol == "Stock":
         "🤖 Asistente MIA (Consultas)",
         "📖 Glosario de Códigos",
     ]
-else:  # Administrador
+else:
     menu = [
         "📊 Tablero e Inventario",
         "➕ Carga / Inserción de Stock",
@@ -246,3 +246,5 @@ elif eleccion == "📤 Entregas y Remitos":
 
         if btn_entregar:
             if not cliente.strip() or not codigo_scan.strip():
+                st.error("Completá el receptor y el número de serie.")
+            else:
