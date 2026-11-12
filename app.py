@@ -1,12 +1,10 @@
-import streamlit as st
-import pandas as pd
+import streamlit as st, pandas as pd, io, os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-import io, os
 from datetime import datetime
 
 st.set_page_config(page_title="Control de Stock", page_icon="📦", layout="wide")
-st.markdown("""<style>div.stButton>button[kind="primary"],div.stDownloadButton>button[kind="primary"],div.stFormSubmitButton>button[kind="primary"]{background-color:#1D4ED8!important;border-color:#1D4ED8!important;color:white!important;}</style>""", unsafe_allow_html=True)
+st.markdown("""<style>div.stButton>button[kind="primary"],div.stDownloadButton>button[kind="primary"]{background-color:#1D4ED8!important;border-color:#1D4ED8!important;color:white!important;}</style>""", unsafe_allow_html=True)
 
 F_INV, F_USU, F_GLO = "inventario_deposito.csv", "usuarios_stock.csv", "glosario_codigos.csv"
 ESTADOS = ["Nuevo", "Usado", "A revisar", "Baja", "Reciclaje"]
@@ -26,10 +24,8 @@ def cargar_usu():
     base = [{"usuario": "admin", "clave": "Stock2026!", "rol": "Administrador", "nombre": "Responsable de Área", "permisos": "|".join(VISTAS)}]
     if os.path.exists(F_USU):
         for _, r in pd.read_csv(F_USU, dtype=str).fillna("").iterrows():
-            if r["clave"] != "Stock2026!":
-                d = r.to_dict()
-                if not d.get("permisos"): d["permisos"] = "|".join(VISTAS[:3])
-                base.append(d)
+            if r["usuario"] != "admin":
+                d = r.to_dict(); d["permisos"] = d.get("permisos") or "|".join(VISTAS[:3]); base.append(d)
     return base
 
 def cargar_glo():
@@ -51,24 +47,23 @@ def excel_backup(df_i, df_g, df_u):
 if "user" not in st.session_state: st.session_state["user"] = None
 if "vista" not in st.session_state: st.session_state["vista"] = "📊 Inventario"
 
-# --- LOGIN SOLO CON CLAVE ---
 if not st.session_state["user"]:
-    st.write(""); st.write("")
-    _, centro, _ = st.columns([1.3, 1, 1.3])
+    st.write(""); _, centro, _ = st.columns([1.3, 1, 1.3])
     with centro:
         with st.container(border=True):
             st.markdown("### 🔐 Control de Stock")
-            p = st.text_input("Ingresá tu clave de acceso:", type="password", autocomplete="off").strip()
+            u = st.text_input("Usuario:", autocomplete="off", key="inp_u").strip()
+            p = st.text_input("Clave:", type="password", autocomplete="new-password", key="inp_p").strip()
             if st.button("Ingresar", type="primary", use_container_width=True):
-                ok = next((x for x in cargar_usu() if x["clave"] == p), None)
+                ok = next((x for x in cargar_usu() if x["usuario"] == u and x["clave"] == p), None)
                 if ok: st.session_state["user"], st.session_state["vista"] = ok, ok["permisos"].split("|")[0]; st.rerun()
-                else: st.error("Clave incorrecta.")
+                else: st.error("Usuario o clave incorrectos.")
     st.stop()
 
 usr = st.session_state["user"]
 opciones = [v for v in VISTAS if v in usr.get("permisos", "").split("|")] or ["📊 Inventario"]
 c_tit, c_salir = st.columns([5, 1])
-c_tit.markdown(f"### 📦 Control de Stock — {usr.get('nombre', 'Usuario')} `{usr['rol']}`")
+c_tit.markdown(f"### 📦 Control de Stock — {usr.get('nombre', usr['usuario'])} `{usr['rol']}`")
 if c_salir.button("Cerrar Sesión", use_container_width=True): st.session_state["user"] = None; st.rerun()
 
 cols_nav = st.columns(len(opciones))
@@ -78,59 +73,7 @@ for i, op in enumerate(opciones):
 st.divider()
 vista = st.session_state["vista"]
 
-if vista == "👥 Usuarios":
-    lu = cargar_usu()
-    st.dataframe(pd.DataFrame(lu)[["nombre", "rol", "permisos"]], use_container_width=True, hide_index=True)
-    st.subheader("➕ Crear Nuevo Acceso y Elegir Permisos")
-    c1, c2, c3 = st.columns(3)
-    un, up, ur = c1.text_input("Nombre / Área:"), c2.text_input("Clave de acceso asignada:"), c3.selectbox("Perfil Base:", ["Revisor", "Stock", "Administrador"])
-    p_cols = st.columns(4)
-    elegidos = [v for i, v in enumerate(VISTAS) if p_cols[i % 4].checkbox(v, value=(ur=="Administrador" or (ur=="Stock" and i<6) or (ur=="Revisor" and i<3)), key=f"c_{v}")]
-    if st.button("Guardar Usuario", type="primary") and up.strip():
-        if not any(x["clave"] == up.strip() for x in lu):
-            lu.append({"nombre": un.strip() or "Usuario", "usuario": un.strip() or "user", "clave": up.strip(), "rol": ur, "permisos": "|".join(elegidos)})
-            pd.DataFrame(lu).to_csv(F_USU, index=False); st.success("✅ Usuario creado."); st.rerun()
-        else: st.error("Esa clave ya está en uso por otro usuario.")
-
-elif vista == "💾 Backup Oficina":
-    xb = excel_backup(cargar_inv(), cargar_glo(), pd.DataFrame(cargar_usu()))
-    st.download_button("📥 Descargar Backup Completo en Excel (.xlsx)", data=xb, file_name=f"Backup_Stock_{datetime.now().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
-    up = st.file_uploader("Restaurar desde Backup Excel (.xlsx)", type=["xlsx"])
-    if up and st.button("Restaurar Datos"):
-        xls = pd.ExcelFile(up)
-        if "Inventario" in xls.sheet_names: pd.read_excel(xls, "Inventario").to_csv(F_INV, index=False)
-        if "Glosario" in xls.sheet_names: pd.read_excel(xls, "Glosario").to_csv(F_GLO, index=False)
-        if "Usuarios" in xls.sheet_names: pd.read_excel(xls, "Usuarios").to_csv(F_USU, index=False)
-        st.success("✅ Restaurado."); st.rerun()
-
-elif vista == "✏️ Editar Stock":
-    df = cargar_inv()
-    if df.empty: st.info("No hay artículos cargados todavía para editar.")
-    else:
-        sel = st.selectbox("Seleccioná el Número de Serie:", df["numero_serie"].tolist())
-        idx = df.index[df["numero_serie"] == sel].tolist()[0]
-        c1, c2 = st.columns(2)
-        enom, emod = c1.text_input("Artículo:", value=str(df.at[idx, "articulo"])), c2.selectbox("Módulo:", MODULOS, index=MODULOS.index(df.at[idx, "modulo"]) if df.at[idx, "modulo"] in MODULOS else 7)
-        ecat, eest = c1.text_input("Categoría:", value=str(df.at[idx, "categoria"])), c2.selectbox("Estado:", ESTADOS, index=ESTADOS.index(df.at[idx, "estado"]) if df.at[idx, "estado"] in ESTADOS else 0)
-        ecant = c1.number_input("Cantidad:", min_value=0, value=int(df.at[idx, "cantidad"]))
-        if st.button("Guardar Cambios", type="primary"):
-            df.at[idx, "articulo"], df.at[idx, "modulo"], df.at[idx, "categoria"], df.at[idx, "estado"], df.at[idx, "cantidad"] = enom.strip(), emod, ecat.strip(), eest, int(ecant)
-            df.to_csv(F_INV, index=False); st.success("✅ Actualizado."); st.rerun()
-
-elif vista == "📤 Entregas":
-    df = cargar_inv(); cli = st.text_input("Receptor / Destinatario:")
-    lista_art = [f"{r['numero_serie']} - {r['articulo']} (Disp: {r['cantidad']})" for _, r in df.iterrows()] if not df.empty else ["Sin artículos cargados aún"]
-    sel_art = st.selectbox("Artículo / Serie:", lista_art); ce, obs = st.number_input("Cantidad:", min_value=1, value=1), st.text_area("Observaciones:")
-    if st.button("Confirmar Entrega y Generar Remito", type="primary"):
-        if not df.empty and cli.strip():
-            ser = sel_art.split(" - ")[0].strip(); idx = df.index[df["numero_serie"] == ser].tolist()[0]
-            if int(df.at[idx, "cantidad"]) >= ce:
-                df.at[idx, "cantidad"] = int(df.at[idx, "cantidad"]) - ce; df.to_csv(F_INV, index=False)
-                st.session_state["pdf"] = pdf_remito(cli, ser, ce, obs, str(df.at[idx, "articulo"])); st.success("✅ Entrega registrada:")
-            else: st.error("Stock insuficiente.")
-    if "pdf" in st.session_state: st.download_button("📄 Descargar Remito PDF", data=st.session_state["pdf"], file_name="Remito.pdf", mime="application/pdf", type="primary")
-
-elif vista == "📊 Inventario":
+if vista == "📊 Inventario":
     df = cargar_inv()
     if df.empty: st.info("Inventario vacío. Cargá artículos en '➕ Cargar Stock'.")
     else:
@@ -147,3 +90,52 @@ elif vista == "🤖 Asistente MIA":
     elif q == "Resumen por Módulo": st.dataframe(df.groupby("modulo", as_index=False)["cantidad"].sum(), use_container_width=True, hide_index=True)
     elif q == "Ver Módulo específico": ms = st.selectbox("Módulo:", MODULOS); st.dataframe(df[df["modulo"] == ms], use_container_width=True, hide_index=True)
     elif q == "Equipos A revisar / Baja": st.dataframe(df[df["estado"].isin(["A revisar", "Baja"])], use_container_width=True, hide_index=True)
+    elif q == "Stock crítico (<=1)": st.dataframe(df[df["cantidad"] <= 1], use_container_width=True, hide_index=True)
+
+elif vista == "📖 Glosario":
+    dfg = cargar_glo(); bg = st.text_input("Buscar código o descripción:")
+    st.dataframe(dfg[dfg.astype(str).apply(lambda x: x.str.contains(bg, case=False, na=False)).any(axis=1)] if (bg and not dfg.empty) else dfg, use_container_width=True, hide_index=True)
+    if "➕ Cargar Stock" in opciones:
+        c1, c2, c3, c4 = st.columns(4)
+        gc, ga, gm, gd = c1.text_input("Código*:"), c2.text_input("Artículo*:"), c3.selectbox("Módulo:", MODULOS), c4.text_input("Descriptivo*:")
+        if st.button("Guardar en Glosario", type="primary") and gc and ga and gd:
+            pd.concat([dfg, pd.DataFrame([{"codigo": gc.strip(), "articulo": ga.strip(), "modulo": gm, "descripcion": gd.strip()}])], ignore_index=True).to_csv(F_GLO, index=False); st.rerun()
+
+elif vista == "➕ Cargar Stock":
+    c1, c2 = st.columns(2)
+    cod, nom = c1.text_input("Número de Serie / Código*:"), c2.text_input("Nombre del Artículo*:")
+    mod, cat = c1.selectbox("Módulo*:", MODULOS), c2.text_input("Categoría:")
+    est, cant = c1.selectbox("Estado:", ESTADOS), c2.number_input("Cantidad:", min_value=1, value=1)
+    if st.button("Guardar Artículo", type="primary") and cod.strip() and nom.strip():
+        df = cargar_inv()
+        if cod.strip() in df["numero_serie"].values: st.warning("Ese código ya existe.")
+        else:
+            pd.concat([df, pd.DataFrame([{"numero_serie": cod.strip(), "articulo": nom.strip(), "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)}])], ignore_index=True).to_csv(F_INV, index=False); st.success(f"✅ Guardado en {mod}.")
+
+elif vista == "📤 Entregas":
+    df = cargar_inv(); cli = st.text_input("Receptor / Destinatario:")
+    lista_art = [f"{r['numero_serie']} - {r['articulo']} (Disp: {r['cantidad']})" for _, r in df.iterrows()] if not df.empty else ["Sin artículos cargados aún"]
+    sel_art = st.selectbox("Artículo / Serie:", lista_art); ce, obs = st.number_input("Cantidad:", min_value=1, value=1), st.text_area("Observaciones:")
+    if st.button("Confirmar Entrega y Generar Remito", type="primary") and not df.empty and cli.strip():
+        ser = sel_art.split(" - ")[0].strip(); idx = df.index[df["numero_serie"] == ser].tolist()[0]
+        if int(df.at[idx, "cantidad"]) >= ce:
+            df.at[idx, "cantidad"] = int(df.at[idx, "cantidad"]) - ce; df.to_csv(F_INV, index=False)
+            st.session_state["pdf"] = pdf_remito(cli, ser, ce, obs, str(df.at[idx, "articulo"])); st.success("✅ Entrega registrada:")
+        else: st.error("Stock insuficiente.")
+    if "pdf" in st.session_state: st.download_button("📄 Descargar Remito PDF", data=st.session_state["pdf"], file_name="Remito.pdf", mime="application/pdf", type="primary")
+
+elif vista == "✏️ Editar Stock":
+    df = cargar_inv()
+    if df.empty: st.info("No hay artículos cargados todavía para editar.")
+    else:
+        sel = st.selectbox("Seleccioná el Número de Serie:", df["numero_serie"].tolist())
+        idx = df.index[df["numero_serie"] == sel].tolist()[0]; c1, c2 = st.columns(2)
+        enom, emod = c1.text_input("Artículo:", value=str(df.at[idx, "articulo"])), c2.selectbox("Módulo:", MODULOS, index=MODULOS.index(df.at[idx, "modulo"]) if df.at[idx, "modulo"] in MODULOS else 7)
+        ecat, eest = c1.text_input("Categoría:", value=str(df.at[idx, "categoria"])), c2.selectbox("Estado:", ESTADOS, index=ESTADOS.index(df.at[idx, "estado"]) if df.at[idx, "estado"] in ESTADOS else 0)
+        ecant = c1.number_input("Cantidad:", min_value=0, value=int(df.at[idx, "cantidad"]))
+        if st.button("Guardar Cambios", type="primary"):
+            df.at[idx, "articulo"], df.at[idx, "modulo"], df.at[idx, "categoria"], df.at[idx, "estado"], df.at[idx, "cantidad"] = enom.strip(), emod, ecat.strip(), eest, int(ecant)
+            df.to_csv(F_INV, index=False); st.success("✅ Actualizado."); st.rerun()
+
+elif vista == "💾 Backup Oficina":
+    xb = excel_backup(cargar_inv(), cargar_glo(), pd.DataFrame(cargar_usu()))
