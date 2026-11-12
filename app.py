@@ -2,7 +2,7 @@ import streamlit as st, pandas as pd, io, os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from datetime import datetime
-from vistas_admin import mostrar_editar, mostrar_backup, mostrar_usuarios
+from vistas_admin import mostrar_chat, mostrar_editar, mostrar_backup, mostrar_usuarios
 
 st.set_page_config(page_title="Control de Stock", page_icon="📦", layout="wide")
 st.markdown("""<style>div.stButton>button[kind="primary"],div.stDownloadButton>button[kind="primary"]{background-color:#1D4ED8!important;border-color:#1D4ED8!important;color:white!important;}</style>""", unsafe_allow_html=True)
@@ -10,7 +10,7 @@ st.markdown("""<style>div.stButton>button[kind="primary"],div.stDownloadButton>b
 F_INV, F_USU, F_GLO = "inventario_deposito.csv", "usuarios_stock.csv", "glosario_codigos.csv"
 ESTADOS = ["Nuevo", "Usado", "A revisar", "Baja", "Reciclaje"]
 MODULOS = ["Entretenimiento", "Capacitación", "Microcine", "Robótica", "Cartelería", "Impresión 3D", "Mobiliario", "General"]
-VISTAS = ["📊 Inventario", "🤖 Asistente MIA", "📖 Glosario", "➕ Cargar Stock", "📤 Entregas", "✏️ Editar Stock", "💾 Backup Oficina", "👥 Usuarios"]
+VISTAS = ["📊 Inventario", "💬 Chat LÍA", "📖 Glosario", "➕ Cargar Stock", "📤 Entregas", "✏️ Editar Stock", "💾 Backup Oficina", "👥 Usuarios"]
 
 def cargar_inv():
     if os.path.exists(F_INV):
@@ -79,13 +79,7 @@ if vista == "📊 Inventario":
         if fb: df = df[df.astype(str).apply(lambda x: x.str.contains(fb, case=False, na=False)).any(axis=1)]
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-elif vista == "🤖 Asistente MIA":
-    df = cargar_inv(); q = st.selectbox("Consulta rápida MIA:", ["Resumen por Módulo", "Ver Módulo específico", "Equipos A revisar / Baja", "Stock crítico (<=1)"])
-    if df.empty: st.warning("Sin datos.")
-    elif q == "Resumen por Módulo": st.dataframe(df.groupby("modulo", as_index=False)["cantidad"].sum(), use_container_width=True, hide_index=True)
-    elif q == "Ver Módulo específico": ms = st.selectbox("Módulo:", MODULOS); st.dataframe(df[df["modulo"] == ms], use_container_width=True, hide_index=True)
-    elif q == "Equipos A revisar / Baja": st.dataframe(df[df["estado"].isin(["A revisar", "Baja"])], use_container_width=True, hide_index=True)
-    elif q == "Stock crítico (<=1)": st.dataframe(df[df["cantidad"] <= 1], use_container_width=True, hide_index=True)
+elif vista == "💬 Chat LÍA": mostrar_chat(cargar_inv, MODULOS, ESTADOS, usr)
 
 elif vista == "📖 Glosario":
     dfg = cargar_glo(); bg = st.text_input("Buscar código o descripción:")
