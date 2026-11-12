@@ -2,6 +2,7 @@ import streamlit as st, pandas as pd, io, os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from datetime import datetime
+from vistas_admin import mostrar_editar, mostrar_backup, mostrar_usuarios
 
 st.set_page_config(page_title="Control de Stock", page_icon="📦", layout="wide")
 st.markdown("""<style>div.stButton>button[kind="primary"],div.stDownloadButton>button[kind="primary"]{background-color:#1D4ED8!important;border-color:#1D4ED8!important;color:white!important;}</style>""", unsafe_allow_html=True)
@@ -38,12 +39,6 @@ def pdf_remito(cli, ser, cant, obs, art):
     p.drawString(50, 670, f"Artículo: {art} (Serie: {ser}) | Cantidad: {cant}"); p.drawString(50, 640, f"Observaciones: {obs}")
     p.line(50, 500, 250, 500); p.drawString(50, 480, "Firma del Receptor"); p.showPage(); p.save(); buf.seek(0); return buf.getvalue()
 
-def excel_backup(df_i, df_g, df_u):
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        df_i.to_excel(w, sheet_name="Inventario", index=False); df_g.to_excel(w, sheet_name="Glosario", index=False); df_u.to_excel(w, sheet_name="Usuarios", index=False)
-    buf.seek(0); return buf.getvalue()
-
 if "user" not in st.session_state: st.session_state["user"] = None
 if "vista" not in st.session_state: st.session_state["vista"] = "📊 Inventario"
 
@@ -62,7 +57,7 @@ if not st.session_state["user"]:
 
 usr = st.session_state["user"]
 opciones = [v for v in VISTAS if v in usr.get("permisos", "").split("|")] or ["📊 Inventario"]
-c_tit, c_salir = st.columns([5, 1])
+c_tit, c_salir = st.columns([4, 1])
 c_tit.markdown(f"### 📦 Control de Stock — {usr.get('nombre', usr['usuario'])} `{usr['rol']}`")
 if c_salir.button("Cerrar Sesión", use_container_width=True): st.session_state["user"] = None; st.rerun()
 
@@ -124,18 +119,6 @@ elif vista == "📤 Entregas":
         else: st.error("Stock insuficiente.")
     if "pdf" in st.session_state: st.download_button("📄 Descargar Remito PDF", data=st.session_state["pdf"], file_name="Remito.pdf", mime="application/pdf", type="primary")
 
-elif vista == "✏️ Editar Stock":
-    df = cargar_inv()
-    if df.empty: st.info("No hay artículos cargados todavía para editar.")
-    else:
-        sel = st.selectbox("Seleccioná el Número de Serie:", df["numero_serie"].tolist())
-        idx = df.index[df["numero_serie"] == sel].tolist()[0]; c1, c2 = st.columns(2)
-        enom, emod = c1.text_input("Artículo:", value=str(df.at[idx, "articulo"])), c2.selectbox("Módulo:", MODULOS, index=MODULOS.index(df.at[idx, "modulo"]) if df.at[idx, "modulo"] in MODULOS else 7)
-        ecat, eest = c1.text_input("Categoría:", value=str(df.at[idx, "categoria"])), c2.selectbox("Estado:", ESTADOS, index=ESTADOS.index(df.at[idx, "estado"]) if df.at[idx, "estado"] in ESTADOS else 0)
-        ecant = c1.number_input("Cantidad:", min_value=0, value=int(df.at[idx, "cantidad"]))
-        if st.button("Guardar Cambios", type="primary"):
-            df.at[idx, "articulo"], df.at[idx, "modulo"], df.at[idx, "categoria"], df.at[idx, "estado"], df.at[idx, "cantidad"] = enom.strip(), emod, ecat.strip(), eest, int(ecant)
-            df.to_csv(F_INV, index=False); st.success("✅ Actualizado."); st.rerun()
-
-elif vista == "💾 Backup Oficina":
-    xb = excel_backup(cargar_inv(), cargar_glo(), pd.DataFrame(cargar_usu()))
+elif vista == "✏️ Editar Stock": mostrar_editar(cargar_inv, F_INV, MODULOS, ESTADOS)
+elif vista == "💾 Backup Oficina": mostrar_backup(cargar_inv, cargar_glo, cargar_usu, F_INV, F_GLO, F_USU)
+elif vista == "👥 Usuarios": mostrar_usuarios(cargar_usu, F_USU, VISTAS)
