@@ -70,6 +70,20 @@ def pdf_remito(cli, ser, cant, obs, art):
     buf.seek(0)
     return buf.getvalue()
 
+def importar_planilla(df_subido, cols_req):
+    df_actual = cargar_inv()
+    df_limpio = df_subido[cols_req].dropna(subset=["numero_serie", "articulo"]).copy()
+    df_limpio["numero_serie"] = df_limpio["numero_serie"].str.strip()
+    df_limpio["modulo"] = df_limpio["modulo"].fillna("General")
+    df_limpio["estado"] = df_limpio["estado"].fillna("Nuevo")
+    df_limpio["cantidad"] = pd.to_numeric(df_limpio["cantidad"], errors="coerce").fillna(1).astype(int)
+    df_nuevos = df_limpio[~df_limpio["numero_serie"].isin(df_actual["numero_serie"])]
+    if not df_nuevos.empty:
+        pd.concat([df_actual, df_nuevos], ignore_index=True).to_csv(F_INV, index=False)
+        st.success(f"✅ Se importaron {len(df_nuevos)} artículos nuevos.")
+    else:
+        st.warning("Todos los códigos del archivo ya existen en el inventario.")
+
 if "user" not in st.session_state:
     st.session_state["user"] = None
 if "vista" not in st.session_state:
@@ -104,14 +118,9 @@ with c_menu:
     with st.popover(f"👤 {usr['usuario']}"):
         palabras = usr.get("nombre", usr["usuario"]).strip().split()
         iniciales = "".join([p[0].upper() for p in palabras[:2]]) if palabras else "US"
-        
         col_img, col_info = st.columns([1, 2.5])
-        col_img.markdown(
-            f"""<div style="width:46px;height:46px;border-radius:50%;background-color:#1D4ED8;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:17px;">{iniciales}</div>""",
-            unsafe_allow_html=True
-        )
+        col_img.markdown(f"""<div style="width:46px;height:46px;border-radius:50%;background-color:#1D4ED8;color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:17px;">{iniciales}</div>""", unsafe_allow_html=True)
         col_info.markdown(f"**{usr.get('nombre', usr['usuario'])}**\n\n`{usr['rol']}`")
-        
         st.divider()
         with st.expander("🔑 Cambiar clave"):
             c_act = st.text_input("Clave actual:", type="password", key="c_act")
@@ -190,14 +199,7 @@ elif vista == "➕ Cargar Stock":
         if cod.strip() in df["numero_serie"].values:
             st.warning("Ese código ya existe en el inventario.")
         else:
-            nueva_fila = pd.DataFrame([{
-                "numero_serie": cod.strip(),
-                "articulo": nom.strip(),
-                "modulo": mod,
-                "categoria": cat.strip(),
-                "estado": est,
-                "cantidad": int(cant)
-            }])
+            nueva_fila = pd.DataFrame([{"numero_serie": cod.strip(), "articulo": nom.strip(), "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)}])
             pd.concat([df, nueva_fila], ignore_index=True).to_csv(F_INV, index=False)
             st.success("✅ Artículo guardado correctamente.")
             st.rerun()
@@ -205,17 +207,3 @@ elif vista == "➕ Cargar Stock":
     st.divider()
     st.subheader("📥 Carga Masiva desde Excel o CSV")
     st.caption("Columnas requeridas: numero_serie, articulo, modulo, categoria, estado, cantidad")
-    archivo = st.file_uploader("Seleccionar archivo (.xlsx o .csv)", type=["xlsx", "csv"])
-
-    if archivo is not None:
-        if archivo.name.endswith(".csv"):
-            df_subido = pd.read_csv(archivo, dtype={"numero_serie": str})
-        else:
-            df_subido = pd.read_excel(archivo, dtype={"numero_serie": str})
-
-        df_subido.columns = [c.strip().lower() for c in df_subido.columns]
-        cols_req = ["numero_serie", "articulo", "modulo", "categoria", "estado", "cantidad"]
-
-        if all(col in df_subido.columns for col in cols_req):
-            st.dataframe(df_subido[cols_req].head(10), use_container_width=True, hide_index=True)
-            if st.button("Importar al Inventario", type="primary"):
