@@ -70,19 +70,69 @@ def pdf_remito(cli, ser, cant, obs, art):
     buf.seek(0)
     return buf.getvalue()
 
-def importar_planilla(df_subido, cols_req):
-    df_actual = cargar_inv()
-    df_limpio = df_subido[cols_req].dropna(subset=["numero_serie", "articulo"]).copy()
-    df_limpio["numero_serie"] = df_limpio["numero_serie"].str.strip()
-    df_limpio["modulo"] = df_limpio["modulo"].fillna("General")
-    df_limpio["estado"] = df_limpio["estado"].fillna("Nuevo")
-    df_limpio["cantidad"] = pd.to_numeric(df_limpio["cantidad"], errors="coerce").fillna(1).astype(int)
-    df_nuevos = df_limpio[~df_limpio["numero_serie"].isin(df_actual["numero_serie"])]
-    if not df_nuevos.empty:
-        pd.concat([df_actual, df_nuevos], ignore_index=True).to_csv(F_INV, index=False)
-        st.success(f"✅ Se importaron {len(df_nuevos)} artículos nuevos.")
-    else:
-        st.warning("Todos los códigos del archivo ya existen en el inventario.")
+def vista_cargar_manual():
+    c1, c2 = st.columns(2)
+    cod = c1.text_input("Número de Serie / Código*:")
+    nom = c2.text_input("Nombre del Artículo*:")
+    mod = c1.selectbox("Módulo*:", MODULOS)
+    cat = c2.text_input("Categoría:")
+    est = c1.selectbox("Estado:", ESTADOS)
+    cant = c2.number_input("Cantidad:", min_value=1, value=1)
+    if st.button("Guardar Artículo", type="primary") and cod.strip() and nom.strip():
+        df = cargar_inv()
+        if cod.strip() in df["numero_serie"].values:
+            st.warning("Ese código ya existe en el inventario.")
+        else:
+            nueva_fila = pd.DataFrame([{"numero_serie": cod.strip(), "articulo": nom.strip(), "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)}])
+            pd.concat([df, nueva_fila], ignore_index=True).to_csv(F_INV, index=False)
+            st.success("✅ Artículo guardado correctamente.")
+            st.rerun()
+
+def vista_cargar_masiva():
+    st.info("Columnas requeridas en el archivo: numero_serie, articulo, modulo, categoria, estado, cantidad")
+    archivo = st.file_uploader("Seleccionar archivo (.xlsx o .csv)", type=["xlsx", "csv"], key="uploader_stock")
+    if archivo is not None:
+        df_subido = pd.read_csv(archivo, dtype={"numero_serie": str}) if archivo.name.endswith(".csv") else pd.read_excel(archivo, dtype={"numero_serie": str})
+        df_subido.columns = [c.strip().lower() for c in df_subido.columns]
+        cols_req = ["numero_serie", "articulo", "modulo", "categoria", "estado", "cantidad"]
+        if all(col in df_subido.columns for col in cols_req):
+            st.dataframe(df_subido[cols_req].head(10), use_container_width=True, hide_index=True)
+            if st.button("Importar al Inventario", type="primary"):
+                df_actual = cargar_inv()
+                df_limpio = df_subido[cols_req].dropna(subset=["numero_serie", "articulo"]).copy()
+                df_limpio["numero_serie"] = df_limpio["numero_serie"].str.strip()
+                df_limpio["modulo"] = df_limpio["modulo"].fillna("General")
+                df_limpio["estado"] = df_limpio["estado"].fillna("Nuevo")
+                df_limpio["cantidad"] = pd.to_numeric(df_limpio["cantidad"], errors="coerce").fillna(1).astype(int)
+                df_nuevos = df_limpio[~df_limpio["numero_serie"].isin(df_actual["numero_serie"])]
+                if not df_nuevos.empty:
+                    pd.concat([df_actual, df_nuevos], ignore_index=True).to_csv(F_INV, index=False)
+                    st.success(f"✅ Se importaron {len(df_nuevos)} artículos nuevos.")
+                else:
+                    st.warning("Todos los códigos del archivo ya existen en el inventario.")
+        else:
+            st.error(f"Faltan columnas obligatorias. Tu archivo tiene: {list(df_subido.columns)}")
+
+def vista_entregas():
+    df = cargar_inv()
+    disp = df[df["cantidad"] > 0]
+    if disp.empty:
+        st.info("No hay artículos con stock disponible para entregar.")
+        return
+    opciones_art = {f"{r['articulo']} (Serie: {r['numero_serie']} | Disp: {r['cantidad']})": r["numero_serie"] for _, r in disp.iterrows()}
+    sel = st.selectbox("Seleccionar Artículo:", list(opciones_art.keys()))
+    ser_sel = opciones_art[sel]
+    fila = disp[disp["numero_serie"] == ser_sel].iloc[0]
+    c1, c2 = st.columns(2)
+    receptor = c1.text_input("Receptor / Área destino*:")
+    cant_ent = c2.number_input("Cantidad a entregar:", min_value=1, max_value=int(fila["cantidad"]), value=1)
+    obs = st.text_input("Observaciones:")
+    if st.button("Confirmar Entrega y Generar Remito", type="primary") and receptor.strip():
+        df.loc[df["numero_serie"] == ser_sel, "cantidad"] -= int(cant_ent)
+        df.to_csv(F_INV, index=False)
+        pdf_bytes = pdf_remito(receptor.strip(), ser_sel, int(cant_ent), obs.strip(), fila["articulo"])
+        st.success("✅ Entrega registrada y stock actualizado.")
+        st.download_button("📄 Descargar Remito PDF", data=pdf_bytes, file_name=f"remito_{ser_sel}.pdf", mime="application/pdf", type="primary")
 
 if "user" not in st.session_state:
     st.session_state["user"] = None
@@ -110,7 +160,6 @@ if not st.session_state["user"]:
 usr = st.session_state["user"]
 opciones = [v for v in VISTAS if v in usr.get("permisos", "").split("|")] or ["📊 Inventario"]
 
-# --- ENCABEZADO Y MENÚ DE USUARIO ---
 c_tit, c_menu = st.columns([4.5, 0.5])
 c_tit.markdown(f"### 📦 Control de Stock — {usr.get('nombre', usr['usuario'])} `{usr['rol']}`")
 
@@ -139,71 +188,3 @@ with c_menu:
                     st.success("✅ Clave cambiada.")
         st.divider()
         if st.button("🚪 Salir", use_container_width=True):
-            st.session_state["user"] = None
-            st.rerun()
-
-cols_nav = st.columns(len(opciones))
-for i, op in enumerate(opciones):
-    if cols_nav[i].button(op, type=("primary" if st.session_state["vista"] == op else "secondary"), use_container_width=True):
-        st.session_state["vista"] = op
-        st.rerun()
-st.divider()
-vista = st.session_state["vista"]
-
-if vista == "📊 Inventario":
-    df = cargar_inv()
-    if df.empty:
-        st.info("Inventario vacío. Cargá artículos en '➕ Cargar Stock'.")
-    else:
-        c1, c2, c3 = st.columns(3)
-        fm = c1.selectbox("Módulo:", ["Todos"] + MODULOS)
-        fe = c2.selectbox("Estado:", ["Todos"] + ESTADOS)
-        fb = c3.text_input("Buscar:")
-        if fm != "Todos":
-            df = df[df["modulo"] == fm]
-        if fe != "Todos":
-            df = df[df["estado"] == fe]
-        if fb:
-            df = df[df.astype(str).apply(lambda x: x.str.contains(fb, case=False, na=False)).any(axis=1)]
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-elif vista == "💬 Chat LÍA":
-    mostrar_chat(cargar_inv, MODULOS, ESTADOS, usr)
-
-elif vista == "📖 Glosario":
-    dfg = cargar_glo()
-    bg = st.text_input("Buscar código o descripción:")
-    st.dataframe(dfg[dfg.astype(str).apply(lambda x: x.str.contains(bg, case=False, na=False)).any(axis=1)] if (bg and not dfg.empty) else dfg, use_container_width=True, hide_index=True)
-    if "➕ Cargar Stock" in opciones:
-        c1, c2, c3, c4 = st.columns(4)
-        gc = c1.text_input("Código*:")
-        ga = c2.text_input("Artículo*:")
-        gm = c3.selectbox("Módulo:", MODULOS)
-        gd = c4.text_input("Descriptivo*:")
-        if st.button("Guardar en Glosario", type="primary") and gc and ga and gd:
-            nuevo_g = pd.DataFrame([{"codigo": gc.strip(), "articulo": ga.strip(), "modulo": gm, "descripcion": gd.strip()}])
-            pd.concat([dfg, nuevo_g], ignore_index=True).to_csv(F_GLO, index=False)
-            st.rerun()
-
-elif vista == "➕ Cargar Stock":
-    tab_manual, tab_masiva = st.tabs(["✍️ Carga Manual Individual", "📥 Carga Masiva (Excel / CSV)"])
-
-    with tab_manual:
-        c1, c2 = st.columns(2)
-        cod = c1.text_input("Número de Serie / Código*:")
-        nom = c2.text_input("Nombre del Artículo*:")
-        mod = c1.selectbox("Módulo*:", MODULOS)
-        cat = c2.text_input("Categoría:")
-        est = c1.selectbox("Estado:", ESTADOS)
-        cant = c2.number_input("Cantidad:", min_value=1, value=1)
-        if st.button("Guardar Artículo", type="primary") and cod.strip() and nom.strip():
-            df = cargar_inv()
-            if cod.strip() in df["numero_serie"].values:
-                st.warning("Ese código ya existe en el inventario.")
-            else:
-                nueva_fila = pd.DataFrame([{"numero_serie": cod.strip(), "articulo": nom.strip(), "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)}])
-                pd.concat([df, nueva_fila], ignore_index=True).to_csv(F_INV, index=False)
-                st.success("✅ Artículo guardado correctamente.")
-                st.rerun()
-
-    with tab_masiva:
