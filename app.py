@@ -126,5 +126,5 @@ elif vista == "📖 Glosario":
 elif vista == "➕ Cargar Stock": mostrar_cargar_stock(cargar_inv, F_INV, MODULOS, ESTADOS)
 elif vista == "📤 Entregas": mostrar_entregas(cargar_inv, F_INV, pdf_remito)
 elif vista == "✏️ Editar Stock": mostrar_editar(cargar_inv, F_INV, MODULOS, ESTADOS)
-elif vista == "💾 Backup Oficina": mostrar_backup(F_INV, F_GLO, F_USU)
+elif vista == "💾 Backup Oficina": mostrar_backup(cargar_inv, cargar_glo, cargar_usu, F_INV, F_GLO, F_USU)
 elif vista == "👥 Usuarios": mostrar_usuarios(cargar_usu, F_USU, VISTAS)
