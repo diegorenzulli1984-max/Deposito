@@ -186,24 +186,24 @@ elif vista == "📖 Glosario":
             st.rerun()
 
 elif vista == "➕ Cargar Stock":
-    st.subheader("Carga Manual Individual")
-    c1, c2 = st.columns(2)
-    cod = c1.text_input("Número de Serie / Código*:")
-    nom = c2.text_input("Nombre del Artículo*:")
-    mod = c1.selectbox("Módulo*:", MODULOS)
-    cat = c2.text_input("Categoría:")
-    est = c1.selectbox("Estado:", ESTADOS)
-    cant = c2.number_input("Cantidad:", min_value=1, value=1)
-    if st.button("Guardar Artículo", type="primary") and cod.strip() and nom.strip():
-        df = cargar_inv()
-        if cod.strip() in df["numero_serie"].values:
-            st.warning("Ese código ya existe en el inventario.")
-        else:
-            nueva_fila = pd.DataFrame([{"numero_serie": cod.strip(), "articulo": nom.strip(), "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)}])
-            pd.concat([df, nueva_fila], ignore_index=True).to_csv(F_INV, index=False)
-            st.success("✅ Artículo guardado correctamente.")
-            st.rerun()
+    tab_manual, tab_masiva = st.tabs(["✍️ Carga Manual Individual", "📥 Carga Masiva (Excel / CSV)"])
 
-    st.divider()
-    st.subheader("📥 Carga Masiva desde Excel o CSV")
-    st.caption("Columnas requeridas: numero_serie, articulo, modulo, categoria, estado, cantidad")
+    with tab_manual:
+        c1, c2 = st.columns(2)
+        cod = c1.text_input("Número de Serie / Código*:")
+        nom = c2.text_input("Nombre del Artículo*:")
+        mod = c1.selectbox("Módulo*:", MODULOS)
+        cat = c2.text_input("Categoría:")
+        est = c1.selectbox("Estado:", ESTADOS)
+        cant = c2.number_input("Cantidad:", min_value=1, value=1)
+        if st.button("Guardar Artículo", type="primary") and cod.strip() and nom.strip():
+            df = cargar_inv()
+            if cod.strip() in df["numero_serie"].values:
+                st.warning("Ese código ya existe en el inventario.")
+            else:
+                nueva_fila = pd.DataFrame([{"numero_serie": cod.strip(), "articulo": nom.strip(), "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)}])
+                pd.concat([df, nueva_fila], ignore_index=True).to_csv(F_INV, index=False)
+                st.success("✅ Artículo guardado correctamente.")
+                st.rerun()
+
+    with tab_masiva:
