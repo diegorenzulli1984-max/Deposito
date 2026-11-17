@@ -1,4 +1,7 @@
-import streamlit as st, pandas as pd, io, os
+import streamlit as st
+import pandas as pd
+import io
+import os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from datetime import datetime
@@ -7,7 +10,10 @@ from vistas_admin import mostrar_chat, mostrar_editar, mostrar_backup, mostrar_u
 st.set_page_config(page_title="Control de Stock", page_icon="📦", layout="wide")
 st.markdown("""<style>div.stButton>button[kind="primary"],div.stDownloadButton>button[kind="primary"]{background-color:#1D4ED8!important;border-color:#1D4ED8!important;color:white!important;}</style>""", unsafe_allow_html=True)
 
-F_INV, F_USU, F_GLO = "inventario_deposito.csv", "usuarios_stock.csv", "glosario_codigos.csv"
+F_INV = "inventario_deposito.csv"
+F_USU = "usuarios_stock.csv"
+F_GLO = "glosario_codigos.csv"
+
 ESTADOS = ["Nuevo", "Usado", "A revisar", "Baja", "Reciclaje"]
 MODULOS = ["Entretenimiento", "Capacitación", "Microcine", "Robótica", "Cartelería", "Impresión 3D", "Mobiliario", "General"]
 VISTAS = ["📊 Inventario", "💬 Chat LÍA", "📖 Glosario", "➕ Cargar Stock", "📤 Entregas", "✏️ Editar Stock", "💾 Backup Oficina", "👥 Usuarios"]
@@ -15,7 +21,8 @@ VISTAS = ["📊 Inventario", "💬 Chat LÍA", "📖 Glosario", "➕ Cargar Stoc
 def cargar_inv():
     if os.path.exists(F_INV):
         df = pd.read_csv(F_INV, dtype={"numero_serie": str})
-        if "modulo" not in df.columns: df["modulo"] = "General"
+        if "modulo" not in df.columns:
+            df["modulo"] = "General"
         df["modulo"] = df["modulo"].fillna("General")
         df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce").fillna(0).astype(int)
         return df
@@ -43,20 +50,34 @@ def cambiar_clave_usuario(usuario_actual, nueva_clave):
     pd.DataFrame(lista_usuarios).to_csv(F_USU, index=False)
 
 def cargar_glo():
-    return pd.read_csv(F_GLO, dtype=str).fillna("") if os.path.exists(F_GLO) else pd.DataFrame(columns=["codigo", "articulo", "modulo", "descripcion"])
+    if os.path.exists(F_GLO):
+        return pd.read_csv(F_GLO, dtype=str).fillna("")
+    return pd.DataFrame(columns=["codigo", "articulo", "modulo", "descripcion"])
 
 def pdf_remito(cli, ser, cant, obs, art):
-    buf = io.BytesIO(); p = canvas.Canvas(buf, pagesize=letter)
-    p.setFont("Helvetica-Bold", 18); p.drawCentredString(300, 750, "REMITO DE ENTREGA OFICIAL"); p.setFont("Helvetica", 12)
+    buf = io.BytesIO()
+    p = canvas.Canvas(buf, pagesize=letter)
+    p.setFont("Helvetica-Bold", 18)
+    p.drawCentredString(300, 750, "REMITO DE ENTREGA OFICIAL")
+    p.setFont("Helvetica", 12)
     p.drawString(50, 700, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Receptor: {cli}")
-    p.drawString(50, 670, f"Artículo: {art} (Serie: {ser}) | Cantidad: {cant}"); p.drawString(50, 640, f"Observaciones: {obs}")
-    p.line(50, 500, 250, 500); p.drawString(50, 480, "Firma del Receptor"); p.showPage(); p.save(); buf.seek(0); return buf.getvalue()
+    p.drawString(50, 670, f"Artículo: {art} (Serie: {ser}) | Cantidad: {cant}")
+    p.drawString(50, 640, f"Observaciones: {obs}")
+    p.line(50, 500, 250, 500)
+    p.drawString(50, 480, "Firma del Receptor")
+    p.showPage()
+    p.save()
+    buf.seek(0)
+    return buf.getvalue()
 
-if "user" not in st.session_state: st.session_state["user"] = None
-if "vista" not in st.session_state: st.session_state["vista"] = "📊 Inventario"
+if "user" not in st.session_state:
+    st.session_state["user"] = None
+if "vista" not in st.session_state:
+    st.session_state["vista"] = "📊 Inventario"
 
 if not st.session_state["user"]:
-    st.write(""); _, centro, _ = st.columns([1.3, 1, 1.3])
+    st.write("")
+    _, centro, _ = st.columns([1.3, 1, 1.3])
     with centro:
         with st.container(border=True):
             st.markdown("### 🔐 Control de Stock")
@@ -64,8 +85,12 @@ if not st.session_state["user"]:
             p = st.text_input("Clave:", type="password", autocomplete="new-password", key="inp_p").strip()
             if st.button("Ingresar", type="primary", use_container_width=True):
                 ok = next((x for x in cargar_usu() if x["usuario"] == u and x["clave"] == p), None)
-                if ok: st.session_state["user"], st.session_state["vista"] = ok, ok["permisos"].split("|")[0]; st.rerun()
-                else: st.error("Usuario o clave incorrectos.")
+                if ok:
+                    st.session_state["user"] = ok
+                    st.session_state["vista"] = ok["permisos"].split("|")[0]
+                    st.rerun()
+                else:
+                    st.error("Usuario o clave incorrectos.")
     st.stop()
 
 usr = st.session_state["user"]
@@ -111,46 +136,67 @@ with c_menu:
 cols_nav = st.columns(len(opciones))
 for i, op in enumerate(opciones):
     if cols_nav[i].button(op, type=("primary" if st.session_state["vista"] == op else "secondary"), use_container_width=True):
-        st.session_state["vista"] = op; st.rerun()
+        st.session_state["vista"] = op
+        st.rerun()
 st.divider()
 vista = st.session_state["vista"]
 
 if vista == "📊 Inventario":
     df = cargar_inv()
-    if df.empty: st.info("Inventario vacío. Cargá artículos en '➕ Cargar Stock'.")
+    if df.empty:
+        st.info("Inventario vacío. Cargá artículos en '➕ Cargar Stock'.")
     else:
         c1, c2, c3 = st.columns(3)
-        fm, fe, fb = c1.selectbox("Módulo:", ["Todos"] + MODULOS), c2.selectbox("Estado:", ["Todos"] + ESTADOS), c3.text_input("Buscar:")
-        if fm != "Todos": df = df[df["modulo"] == fm]
-        if fe != "Todos": df = df[df["estado"] == fe]
-        if fb: df = df[df.astype(str).apply(lambda x: x.str.contains(fb, case=False, na=False)).any(axis=1)]
+        fm = c1.selectbox("Módulo:", ["Todos"] + MODULOS)
+        fe = c2.selectbox("Estado:", ["Todos"] + ESTADOS)
+        fb = c3.text_input("Buscar:")
+        if fm != "Todos":
+            df = df[df["modulo"] == fm]
+        if fe != "Todos":
+            df = df[df["estado"] == fe]
+        if fb:
+            df = df[df.astype(str).apply(lambda x: x.str.contains(fb, case=False, na=False)).any(axis=1)]
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-elif vista == "💬 Chat LÍA": mostrar_chat(cargar_inv, MODULOS, ESTADOS, usr)
+elif vista == "💬 Chat LÍA":
+    mostrar_chat(cargar_inv, MODULOS, ESTADOS, usr)
 
 elif vista == "📖 Glosario":
-    dfg = cargar_glo(); bg = st.text_input("Buscar código o descripción:")
+    dfg = cargar_glo()
+    bg = st.text_input("Buscar código o descripción:")
     st.dataframe(dfg[dfg.astype(str).apply(lambda x: x.str.contains(bg, case=False, na=False)).any(axis=1)] if (bg and not dfg.empty) else dfg, use_container_width=True, hide_index=True)
     if "➕ Cargar Stock" in opciones:
         c1, c2, c3, c4 = st.columns(4)
-        gc, ga, gm, gd = c1.text_input("Código*:"), c2.text_input("Artículo*:"), c3.selectbox("Módulo:", MODULOS), c4.text_input("Descriptivo*:")
+        gc = c1.text_input("Código*:")
+        ga = c2.text_input("Artículo*:")
+        gm = c3.selectbox("Módulo:", MODULOS)
+        gd = c4.text_input("Descriptivo*:")
         if st.button("Guardar en Glosario", type="primary") and gc and ga and gd:
-            pd.concat([dfg, pd.DataFrame([{"codigo": gc.strip(), "articulo": ga.strip(), "modulo": gm, "descripcion": gd.strip()}])], ignore_index=True).to_csv(F_GLO, index=False); st.rerun()
+            nuevo_g = pd.DataFrame([{"codigo": gc.strip(), "articulo": ga.strip(), "modulo": gm, "descripcion": gd.strip()}])
+            pd.concat([dfg, nuevo_g], ignore_index=True).to_csv(F_GLO, index=False)
+            st.rerun()
 
 elif vista == "➕ Cargar Stock":
     st.subheader("Carga Manual Individual")
     c1, c2 = st.columns(2)
-    cod, nom = c1.text_input("Número de Serie / Código*:"), c2.text_input("Nombre del Artículo*:")
-    mod, cat = c1.selectbox("Módulo*:", MODULOS), c2.text_input("Categoría:")
-    est, cant = c1.selectbox("Estado:", ESTADOS), c2.number_input("Cantidad:", min_value=1, value=1)
+    cod = c1.text_input("Número de Serie / Código*:")
+    nom = c2.text_input("Nombre del Artículo*:")
+    mod = c1.selectbox("Módulo*:", MODULOS)
+    cat = c2.text_input("Categoría:")
+    est = c1.selectbox("Estado:", ESTADOS)
+    cant = c2.number_input("Cantidad:", min_value=1, value=1)
     if st.button("Guardar Artículo", type="primary") and cod.strip() and nom.strip():
         df = cargar_inv()
         if cod.strip() in df["numero_serie"].values:
             st.warning("Ese código ya existe en el inventario.")
         else:
             nueva_fila = pd.DataFrame([{
-                "numero_serie": cod.strip(), "articulo": nom.strip(),
-                "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)
+                "numero_serie": cod.strip(),
+                "articulo": nom.strip(),
+                "modulo": mod,
+                "categoria": cat.strip(),
+                "estado": est,
+                "cantidad": int(cant)
             }])
             pd.concat([df, nueva_fila], ignore_index=True).to_csv(F_INV, index=False)
             st.success("✅ Artículo guardado correctamente.")
@@ -158,19 +204,18 @@ elif vista == "➕ Cargar Stock":
 
     st.divider()
     st.subheader("📥 Carga Masiva desde Excel o CSV")
-    st.caption("El archivo debe contener las columnas: `numero_serie`, `articulo`, `modulo`, `categoria`, `estado`, `cantidad`.")
+    st.caption("Columnas requeridas: numero_serie, articulo, modulo, categoria, estado, cantidad")
     archivo = st.file_uploader("Seleccionar archivo (.xlsx o .csv)", type=["xlsx", "csv"])
-    
+
     if archivo is not None:
-        try:
-            df_subido = pd.read_csv(archivo, dtype={"numero_serie": str}) if archivo.name.endswith(".csv") else pd.read_excel(archivo, dtype={"numero_serie": str})
-            df_subido.columns = [c.strip().lower() for c in df_subido.columns]
-            cols_req = ["numero_serie", "articulo", "modulo", "categoria", "estado", "cantidad"]
-            
-            if all(col in df_subido.columns for col in cols_req):
-                st.dataframe(df_subido[cols_req].head(10), use_container_width=True, hide_index=True)
-                if st.button("Importar al Inventario", type="primary"):
-                    df_actual = cargar_inv()
-                    df_limpio = df_subido[cols_req].dropna(subset=["numero_serie", "articulo"]).copy()
-                    df_limpio["numero_serie"] = df_limpio["numero_serie"].str.strip()
-                    df_limpio["modulo"] = df_limpio["modulo"].fillna("General")
+        if archivo.name.endswith(".csv"):
+            df_subido = pd.read_csv(archivo, dtype={"numero_serie": str})
+        else:
+            df_subido = pd.read_excel(archivo, dtype={"numero_serie": str})
+
+        df_subido.columns = [c.strip().lower() for c in df_subido.columns]
+        cols_req = ["numero_serie", "articulo", "modulo", "categoria", "estado", "cantidad"]
+
+        if all(col in df_subido.columns for col in cols_req):
+            st.dataframe(df_subido[cols_req].head(10), use_container_width=True, hide_index=True)
+            if st.button("Importar al Inventario", type="primary"):
