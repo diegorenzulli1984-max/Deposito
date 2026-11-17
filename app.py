@@ -138,28 +138,39 @@ elif vista == "📖 Glosario":
             pd.concat([dfg, pd.DataFrame([{"codigo": gc.strip(), "articulo": ga.strip(), "modulo": gm, "descripcion": gd.strip()}])], ignore_index=True).to_csv(F_GLO, index=False); st.rerun()
 
 elif vista == "➕ Cargar Stock":
+    st.subheader("Carga Manual Individual")
     c1, c2 = st.columns(2)
     cod, nom = c1.text_input("Número de Serie / Código*:"), c2.text_input("Nombre del Artículo*:")
     mod, cat = c1.selectbox("Módulo*:", MODULOS), c2.text_input("Categoría:")
     est, cant = c1.selectbox("Estado:", ESTADOS), c2.number_input("Cantidad:", min_value=1, value=1)
     if st.button("Guardar Artículo", type="primary") and cod.strip() and nom.strip():
         df = cargar_inv()
-        if cod.strip() in df["numero_serie"].values: st.warning("Ese código ya existe.")
+        if cod.strip() in df["numero_serie"].values:
+            st.warning("Ese código ya existe en el inventario.")
         else:
-            pd.concat([df, pd.DataFrame([{"numero_serie": cod.strip(), "articulo": nom.strip(), "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)}])], ignore_index=True).to_csv(F_INV, index=False); st.success(f"✅ Guardado en {mod}.")
+            nueva_fila = pd.DataFrame([{
+                "numero_serie": cod.strip(), "articulo": nom.strip(),
+                "modulo": mod, "categoria": cat.strip(), "estado": est, "cantidad": int(cant)
+            }])
+            pd.concat([df, nueva_fila], ignore_index=True).to_csv(F_INV, index=False)
+            st.success("✅ Artículo guardado correctamente.")
+            st.rerun()
 
-elif vista == "📤 Entregas":
-    df = cargar_inv(); cli = st.text_input("Receptor / Destinatario:")
-    lista_art = [f"{r['numero_serie']} - {r['articulo']} (Disp: {r['cantidad']})" for _, r in df.iterrows()] if not df.empty else ["Sin artículos cargados aún"]
-    sel_art = st.selectbox("Artículo / Serie:", lista_art); ce, obs = st.number_input("Cantidad:", min_value=1, value=1), st.text_area("Observaciones:")
-    if st.button("Confirmar Entrega y Generar Remito", type="primary") and not df.empty and cli.strip():
-        ser = sel_art.split(" - ")[0].strip(); idx = df.index[df["numero_serie"] == ser].tolist()[0]
-        if int(df.at[idx, "cantidad"]) >= ce:
-            df.at[idx, "cantidad"] = int(df.at[idx, "cantidad"]) - ce; df.to_csv(F_INV, index=False)
-            st.session_state["pdf"] = pdf_remito(cli, ser, ce, obs, str(df.at[idx, "articulo"])); st.success("✅ Entrega registrada:")
-        else: st.error("Stock insuficiente.")
-    if "pdf" in st.session_state: st.download_button("📄 Descargar Remito PDF", data=st.session_state["pdf"], file_name="Remito.pdf", mime="application/pdf", type="primary")
-
-elif vista == "✏️ Editar Stock": mostrar_editar(cargar_inv, F_INV, MODULOS, ESTADOS)
-elif vista == "💾 Backup Oficina": mostrar_backup(cargar_inv, cargar_glo, cargar_usu, F_INV, F_GLO, F_USU)
-elif vista == "👥 Usuarios": mostrar_usuarios(cargar_usu, F_USU, VISTAS)
+    st.divider()
+    st.subheader("📥 Carga Masiva desde Excel o CSV")
+    st.caption("El archivo debe contener las columnas: `numero_serie`, `articulo`, `modulo`, `categoria`, `estado`, `cantidad`.")
+    archivo = st.file_uploader("Seleccionar archivo (.xlsx o .csv)", type=["xlsx", "csv"])
+    
+    if archivo is not None:
+        try:
+            df_subido = pd.read_csv(archivo, dtype={"numero_serie": str}) if archivo.name.endswith(".csv") else pd.read_excel(archivo, dtype={"numero_serie": str})
+            df_subido.columns = [c.strip().lower() for c in df_subido.columns]
+            cols_req = ["numero_serie", "articulo", "modulo", "categoria", "estado", "cantidad"]
+            
+            if all(col in df_subido.columns for col in cols_req):
+                st.dataframe(df_subido[cols_req].head(10), use_container_width=True, hide_index=True)
+                if st.button("Importar al Inventario", type="primary"):
+                    df_actual = cargar_inv()
+                    df_limpio = df_subido[cols_req].dropna(subset=["numero_serie", "articulo"]).copy()
+                    df_limpio["numero_serie"] = df_limpio["numero_serie"].str.strip()
+                    df_limpio["modulo"] = df_limpio["modulo"].fillna("General")
